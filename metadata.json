@@ -1,0 +1,5 @@
+{
+  "name": "Retro Racer 2.5D",
+  "description": "Un juego de carreras estilo retro con vista pseudo-3D, minimapa y tabla de clasificación.",
+  "requestFramePermissions": []
+}
