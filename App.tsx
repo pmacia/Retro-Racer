@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Play, Pause, RotateCcw, Trophy, CarFront, Flag, Signal, Gauge, Zap } from 'lucide-react';
+import { Play, Pause, RotateCcw, Trophy, CarFront, Flag, Signal, Gauge, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 import GameCanvas from './components/GameCanvas';
 import { GameStatus, PlayerSettings, Score, Difficulty } from './types';
 import { saveScore, getScores } from './services/storageService';
@@ -17,6 +17,7 @@ const App: React.FC = () => {
   const [scores, setScores] = useState<Score[]>(getScores());
   const [finalTime, setFinalTime] = useState<number>(0);
   const [finalSpeed, setFinalSpeed] = useState<number>(0);
+  const [isLeaderboardExpanded, setIsLeaderboardExpanded] = useState<boolean>(false);
 
   // Calculate best speed to pass to game engine for AI scaling
   const bestSpeed = scores.length > 0 ? scores[0].avgSpeed : 0;
@@ -85,6 +86,21 @@ const App: React.FC = () => {
               }
               .neon-box {
                 box-shadow: 0 0 10px rgba(6,182,212,0.5), inset 0 0 20px rgba(6,182,212,0.2);
+              }
+              /* Custom Scrollbar */
+              .custom-scrollbar::-webkit-scrollbar {
+                width: 6px;
+              }
+              .custom-scrollbar::-webkit-scrollbar-track {
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 4px;
+              }
+              .custom-scrollbar::-webkit-scrollbar-thumb {
+                background: rgba(6, 182, 212, 0.5);
+                border-radius: 4px;
+              }
+              .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                background: rgba(6, 182, 212, 0.8);
               }
             `}</style>
          </div>
@@ -228,25 +244,38 @@ const App: React.FC = () => {
             </div>
           </div>
           
-          {/* Leaderboard (Bottom) */}
+          {/* Leaderboard (Collapsible) */}
           {scores.length > 0 && (
-             <div className="mt-6 w-full max-w-lg bg-black/60 backdrop-blur-md border-t border-gray-800 rounded-xl p-4 animate-in slide-in-from-bottom-10 fade-in duration-700">
-                <h3 className="text-xs font-bold text-gray-500 mb-3 flex items-center justify-center uppercase tracking-[0.2em]">
-                  <Trophy size={14} className="mr-2 text-yellow-500"/> Hall of Fame
-                </h3>
-                <div className="space-y-2">
-                  {scores.slice(0, 3).map((s, i) => (
-                    <div key={i} className="flex justify-between items-center text-sm group hover:bg-white/5 p-1 rounded transition">
-                      <div className="flex items-center">
-                        <span className={`w-6 h-6 flex items-center justify-center rounded font-bold mr-3 ${i===0 ? 'bg-yellow-500 text-black' : i===1 ? 'bg-gray-400 text-black' : 'bg-orange-700 text-white'}`}>
-                          {i+1}
-                        </span>
-                        <span className="text-gray-300 font-mono tracking-wide">{s.name}</span>
-                      </div>
-                      <span className="font-mono font-bold text-cyan-400">{s.avgSpeed.toFixed(0)} <span className="text-xs text-gray-600">KM/H</span></span>
+             <div className="mt-6 w-full max-w-lg bg-black/60 backdrop-blur-md border-t border-gray-800 rounded-xl overflow-hidden animate-in slide-in-from-bottom-10 fade-in duration-700 transition-all shadow-lg">
+                <button 
+                  onClick={() => setIsLeaderboardExpanded(!isLeaderboardExpanded)}
+                  className="w-full flex justify-between items-center p-4 hover:bg-white/5 transition-colors focus:outline-none"
+                >
+                    <div className="flex items-center text-xs font-bold text-gray-400 uppercase tracking-[0.2em]">
+                        <Trophy size={14} className="mr-2 text-yellow-500"/> 
+                        HALL OF FAME
                     </div>
-                  ))}
-                </div>
+                    {isLeaderboardExpanded ? <ChevronUp size={16} className="text-cyan-500"/> : <ChevronDown size={16} className="text-cyan-500"/>}
+                </button>
+                
+                {/* Expanded List */}
+                {isLeaderboardExpanded && (
+                  <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-300">
+                    <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar pr-1">
+                      {scores.map((s, i) => (
+                        <div key={i} className={`flex justify-between items-center text-sm p-2 rounded border border-transparent hover:border-white/10 hover:bg-white/5 transition ${i === 0 ? 'bg-gradient-to-r from-yellow-500/10 to-transparent' : ''}`}>
+                          <div className="flex items-center">
+                            <span className={`w-6 h-6 flex items-center justify-center rounded font-bold mr-3 ${i===0 ? 'bg-yellow-500 text-black shadow-[0_0_10px_rgba(234,179,8,0.5)]' : i===1 ? 'bg-gray-400 text-black' : i===2 ? 'bg-orange-700 text-white' : 'bg-gray-800 text-gray-500'}`}>
+                              {i+1}
+                            </span>
+                            <span className={`font-mono tracking-wide ${i===0 ? 'text-yellow-100 font-bold' : 'text-gray-300'}`}>{s.name}</span>
+                          </div>
+                          <span className={`font-mono font-bold ${i===0 ? 'text-yellow-400' : 'text-cyan-600'}`}>{s.avgSpeed.toFixed(0)} <span className="text-xs text-gray-600">KM/H</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
              </div>
           )}
         </div>
