@@ -17,12 +17,27 @@ export interface PlayerSettings {
   color: string;
   laps: number;
   difficulty: Difficulty;
+  trackId: string; // ID of the selected track
+}
+
+export interface TrackSection {
+  type: 'STRAIGHT' | 'CURVE'; 
+  length: number; // Number of segments
+  curve?: number; // Strength: Negative = Left, Positive = Right. E.g., -2 (Easy Left), 6 (Hard Right)
+}
+
+export interface TrackDefinition {
+  id: string;
+  name: string;
+  description: string;
+  layout: TrackSection[];
 }
 
 export interface Score {
   name: string;
   avgSpeed: number; // km/h (average)
   date: string;
+  trackName?: string;
 }
 
 export interface Point3D {

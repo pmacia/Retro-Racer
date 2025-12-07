@@ -1,13 +1,14 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { GameStatus, PlayerSettings, Car, Segment } from '../types';
 import { createTrack, createCars, updateGame, project } from '../services/gameEngine';
-import { WIDTH, HEIGHT, TRACK_LENGTH, SEGMENT_LENGTH, ROAD_WIDTH, CAMERA_DEPTH, VISIBILITY, COLORS } from '../constants';
+import { getTrackById } from '../services/trackService';
+import { WIDTH, HEIGHT, SEGMENT_LENGTH, ROAD_WIDTH, CAMERA_DEPTH, VISIBILITY, COLORS } from '../constants';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Gauge, Timer, Flag, Map as MapIcon } from 'lucide-react';
 
 interface GameCanvasProps {
   status: GameStatus;
   settings: PlayerSettings;
-  onFinish: (time: number) => void;
+  onFinish: (time: number, totalDistance: number) => void;
   isPaused: boolean;
   bestSpeed?: number; // Passed to adjust AI difficulty if needed
 }
@@ -38,9 +39,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
   // Initialize
   useEffect(() => {
     if (status === GameStatus.PLAYING && carsRef.current.length === 0) {
-      // Create cars using difficulty and passing the best recorded speed
+      // Create cars
       carsRef.current = createCars(settings.color, settings.name, settings.difficulty, bestSpeed);
-      trackRef.current = createTrack();
+      
+      // Load Track based on settings.trackId
+      const trackDef = getTrackById(settings.trackId);
+      trackRef.current = createTrack(trackDef);
       
       // Reset Countdown
       setCountdown(3);
@@ -210,11 +214,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       }
       
       const player = carsRef.current[0];
+      const trackLen = trackRef.current.length;
       
       // Check Finish
       if (player.finished) {
           const totalTime = (Date.now() - startTimeRef.current) / 1000;
-          onFinish(totalTime);
+          const totalDistance = trackRef.current.length * SEGMENT_LENGTH * settings.laps;
+          onFinish(totalTime, totalDistance);
           return; // Stop rendering
       }
 
@@ -284,10 +290,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
 
           // Cars
           carsRef.current.forEach(car => {
-              const segIdx = Math.floor(car.z / SEGMENT_LENGTH) % TRACK_LENGTH;
+              const segIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackLen;
               const seg = trackRef.current[segIdx];
               // Calculate rough angle based on next segment
-              const nextSeg = trackRef.current[(segIdx + 5) % TRACK_LENGTH];
+              const nextSeg = trackRef.current[(segIdx + 5) % trackLen];
               const angle = Math.atan2(nextSeg.mapY - seg.mapY, nextSeg.mapX - seg.mapX);
               
               ctx.save();
@@ -313,7 +319,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         const cameraY = 1500; // Camera Height
         const cameraZ = player.z; // Camera position on track
         
-        const baseSegmentIndex = Math.floor(cameraZ / SEGMENT_LENGTH) % TRACK_LENGTH;
+        const baseSegmentIndex = Math.floor(cameraZ / SEGMENT_LENGTH) % trackLen;
         const baseSegment = trackRef.current[baseSegmentIndex];
         const basePercent = (cameraZ % SEGMENT_LENGTH) / SEGMENT_LENGTH;
         
@@ -323,11 +329,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
 
         // --- DRAW ROAD ---
         for (let n = 0; n < VISIBILITY; n++) {
-            const i = (baseSegmentIndex + n) % TRACK_LENGTH;
+            const i = (baseSegmentIndex + n) % trackLen;
             const segment = trackRef.current[i];
             
             // Z-Coordinate relative to camera
-            const loopZ = (i < baseSegmentIndex) ? TRACK_LENGTH * SEGMENT_LENGTH : 0;
+            const loopZ = (i < baseSegmentIndex) ? trackLen * SEGMENT_LENGTH : 0;
             const segmentZ = (segment.index * SEGMENT_LENGTH + loopZ) - cameraZ;
 
             // Project
@@ -365,7 +371,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
 
         // Fill gap between last segment and horizon with road color (fixes "floating road" look)
         if (maxY > HEIGHT / 2) {
-             const lastSegIdx = (baseSegmentIndex + VISIBILITY) % TRACK_LENGTH;
+             const lastSegIdx = (baseSegmentIndex + VISIBILITY) % trackLen;
              ctx.fillStyle = trackRef.current[lastSegIdx].color.road;
              ctx.fillRect(0, HEIGHT / 2, WIDTH, maxY - HEIGHT / 2);
         }
@@ -373,7 +379,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         // --- DRAW SPRITES & CARS ---
         // Paint back to front
         for (let n = VISIBILITY - 1; n >= 0; n--) {
-            const i = (baseSegmentIndex + n) % TRACK_LENGTH;
+            const i = (baseSegmentIndex + n) % trackLen;
             const segment = trackRef.current[i];
             
             if (!segment.screen) continue;
@@ -431,12 +437,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
                     ctx.fill();
 
                     // Rock body
-                    // Using a quadratic curve that explicitly starts and ends on the ground line (spriteY)
-                    // This prevents the "floating" effect caused by circles/arcs not touching the baseline.
                     ctx.fillStyle = '#666';
                     ctx.beginPath();
                     ctx.moveTo(spriteX - sW * 0.45, spriteY);
-                    // Control point is high in the middle to create a hump
                     ctx.quadraticCurveTo(spriteX, spriteY - sH * 1.2, spriteX + sW * 0.45, spriteY);
                     ctx.closePath();
                     ctx.fill();
@@ -452,7 +455,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             // 2. Cars (Rivals)
             carsRef.current.forEach(car => {
                 if (car === player) return; // Draw player last
-                const carSegIdx = Math.floor(car.z / SEGMENT_LENGTH) % TRACK_LENGTH;
+                const carSegIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackLen;
                 if (carSegIdx === i) {
                     const scale = segment.screen!.w / (ROAD_WIDTH / 2);
                     const carX = segment.screen!.x + (car.offset * segment.screen!.w); 
@@ -478,7 +481,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         drawCar(ctx, WIDTH/2, pY, playerW, playerH, player.color);
 
         // --- MINI MAP OVERLAY (Canvas) ---
-        // Drawn at top right
         const mapSize = 160;
         const mapPadding = 20;
         const mapX = WIDTH - mapSize - mapPadding;
@@ -522,7 +524,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
 
         // Rival Dot
         const rival = carsRef.current[1];
-        const rivalSegIdx = Math.floor(rival.z / SEGMENT_LENGTH) % TRACK_LENGTH;
+        const rivalSegIdx = Math.floor(rival.z / SEGMENT_LENGTH) % trackLen;
         const rivalSeg = trackRef.current[rivalSegIdx];
         ctx.fillStyle = rival.color;
         ctx.beginPath();
@@ -562,7 +564,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
 
     frameIdRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(frameIdRef.current);
-  }, [status, isPaused, onFinish, settings.laps, settings.difficulty, bestSpeed, countdown, viewMode]);
+  }, [status, isPaused, onFinish, settings.laps, settings.difficulty, settings.trackId, bestSpeed, countdown, viewMode]);
 
   return (
     <div className="relative w-full h-full touch-none select-none overflow-hidden">

@@ -1,10 +1,9 @@
-
 import React, { useState } from 'react';
-import { Play, Pause, RotateCcw, Trophy, CarFront, Flag, Signal, Gauge, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Pause, RotateCcw, Trophy, CarFront, Flag, Signal, Gauge, Zap, ChevronDown, ChevronUp, Map, Dna } from 'lucide-react';
 import GameCanvas from './components/GameCanvas';
 import { GameStatus, PlayerSettings, Score, Difficulty } from './types';
 import { saveScore, getScores } from './services/storageService';
-import { TRACK_LENGTH, SEGMENT_LENGTH } from './constants';
+import { PRESET_TRACKS, generateRandomTrack } from './services/trackService';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<GameStatus>(GameStatus.MENU);
@@ -12,7 +11,8 @@ const App: React.FC = () => {
     name: 'JUGADOR 1', 
     color: '#3b82f6', // Default Blue
     laps: 3,
-    difficulty: Difficulty.AMATEUR
+    difficulty: Difficulty.AMATEUR,
+    trackId: 'gp_circuit'
   });
   const [scores, setScores] = useState<Score[]>(getScores());
   const [finalTime, setFinalTime] = useState<number>(0);
@@ -29,8 +29,8 @@ const App: React.FC = () => {
     else if (status === GameStatus.PAUSED) setStatus(GameStatus.PLAYING);
   };
 
-  const handleFinish = (time: number) => {
-    const totalDistance = TRACK_LENGTH * SEGMENT_LENGTH * settings.laps;
+  const handleFinish = (time: number, totalDistance: number) => {
+    // Note: totalDistance is passed from GameCanvas based on the generated track length
     const avgSpeedUnits = totalDistance / time;
     const avgSpeedKmh = avgSpeedUnits / 100;
 
@@ -48,6 +48,11 @@ const App: React.FC = () => {
   const resetGame = () => {
     setStatus(GameStatus.MENU);
   };
+
+  // Helper to find selected track details
+  const selectedTrack = settings.trackId === 'random' 
+      ? { name: 'RANDOM', description: 'Circuito Sorpresa generado proceduralmente' }
+      : PRESET_TRACKS.find(t => t.id === settings.trackId) || PRESET_TRACKS[0];
 
   return (
     <div className="relative w-screen h-screen bg-black flex items-center justify-center overflow-hidden font-sans">
@@ -131,15 +136,15 @@ const App: React.FC = () => {
       {status === GameStatus.MENU && (
         <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-4xl h-full p-4 animate-in fade-in zoom-in duration-500">
           
-          <div className="bg-black/80 backdrop-blur-xl border border-cyan-500/50 p-8 md:p-12 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.3)] w-full max-w-lg neon-box relative overflow-hidden">
+          <div className="bg-black/80 backdrop-blur-xl border border-cyan-500/50 p-6 md:p-8 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.3)] w-full max-w-lg neon-box relative overflow-hidden">
             
             {/* Decorative Lines */}
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
             <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-pink-500 to-transparent"></div>
 
             {/* Header */}
-            <div className="text-center mb-8 relative">
-               <h1 className="text-6xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-cyan-400 drop-shadow-sm transform -skew-x-12 pb-2">
+            <div className="text-center mb-6 relative">
+               <h1 className="text-5xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-cyan-400 drop-shadow-sm transform -skew-x-12 pb-2">
                  RETRO RACER
                </h1>
                <div className="text-pink-500 font-bold tracking-[0.5em] text-xs uppercase animate-pulse">
@@ -147,7 +152,7 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-4">
               
               {/* Name Input */}
               <div className="relative group">
@@ -155,18 +160,37 @@ const App: React.FC = () => {
                   type="text" 
                   value={settings.name}
                   onChange={(e) => setSettings({...settings, name: e.target.value.toUpperCase()})}
-                  className="w-full bg-gray-900/50 border-b-2 border-gray-600 focus:border-cyan-400 text-white text-center font-bold text-xl p-3 outline-none transition-all placeholder-gray-600 uppercase tracking-wider"
+                  className="w-full bg-gray-900/50 border-b-2 border-gray-600 focus:border-cyan-400 text-white text-center font-bold text-xl p-2 outline-none transition-all placeholder-gray-600 uppercase tracking-wider"
                   placeholder="PILOTO"
                   maxLength={10}
                 />
-                <label className="absolute -top-2 left-0 w-full text-center text-xs font-bold text-cyan-500 uppercase tracking-widest opacity-0 group-focus-within:opacity-100 transition-opacity">Nombre del Piloto</label>
+              </div>
+
+              {/* TRACK SELECTOR */}
+              <div className="bg-gray-900/60 p-3 rounded-lg border border-gray-700">
+                  <span className="block text-xs font-bold text-pink-500 uppercase tracking-widest mb-2 flex items-center">
+                    <Map size={12} className="mr-1"/> CIRCUITO
+                  </span>
+                  <div className="flex flex-col gap-2">
+                      <select 
+                        value={settings.trackId}
+                        onChange={(e) => setSettings({...settings, trackId: e.target.value})}
+                        className="w-full bg-black text-white p-2 rounded border border-cyan-500/30 font-mono text-sm uppercase focus:outline-none focus:border-cyan-500"
+                      >
+                         {PRESET_TRACKS.map(t => (
+                           <option key={t.id} value={t.id}>{t.name}</option>
+                         ))}
+                         <option value="random">⚡ Generar Aleatorio ⚡</option>
+                      </select>
+                      <p className="text-gray-400 text-xs italic border-l-2 border-gray-600 pl-2">
+                        {selectedTrack.description}
+                      </p>
+                  </div>
               </div>
               
               {/* Difficulty */}
               <div>
-                 <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-bold text-pink-500 uppercase tracking-widest">Nivel de Habilidad</span>
-                 </div>
+                 <span className="text-xs font-bold text-pink-500 uppercase tracking-widest block mb-1">Dificultad</span>
                  <div className="flex gap-1 bg-gray-900/80 p-1 rounded-lg border border-gray-700">
                    {[
                      { id: Difficulty.ROOKIE, label: 'ROOKIE' },
@@ -176,7 +200,7 @@ const App: React.FC = () => {
                      <button
                        key={level.id}
                        onClick={() => setSettings({...settings, difficulty: level.id})}
-                       className={`flex-1 py-2 text-xs font-black italic uppercase rounded-md transition-all duration-300 ${
+                       className={`flex-1 py-1 text-xs font-black italic uppercase rounded-md transition-all duration-300 ${
                          settings.difficulty === level.id 
                            ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]' 
                            : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
@@ -192,13 +216,13 @@ const App: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                  {/* Laps */}
                  <div>
-                    <span className="block text-xs font-bold text-pink-500 uppercase tracking-widest mb-2">Vueltas</span>
+                    <span className="block text-xs font-bold text-pink-500 uppercase tracking-widest mb-1">Vueltas</span>
                     <div className="grid grid-cols-4 gap-1">
                       {[1, 3, 5, 10].map(lap => (
                         <button
                           key={lap}
                           onClick={() => setSettings({...settings, laps: lap})}
-                          className={`aspect-square flex items-center justify-center font-bold text-sm rounded border transition-all ${
+                          className={`aspect-square flex items-center justify-center font-bold text-xs rounded border transition-all ${
                             settings.laps === lap 
                               ? 'bg-pink-600 border-pink-400 text-white shadow-[0_0_10px_rgba(236,72,153,0.5)]' 
                               : 'bg-gray-900 border-gray-700 text-gray-500 hover:border-gray-500'
@@ -212,13 +236,13 @@ const App: React.FC = () => {
 
                  {/* Colors */}
                  <div>
-                    <span className="block text-xs font-bold text-pink-500 uppercase tracking-widest mb-2">Vehículo</span>
-                    <div className="flex flex-wrap gap-2 justify-end">
+                    <span className="block text-xs font-bold text-pink-500 uppercase tracking-widest mb-1">Vehículo</span>
+                    <div className="flex flex-wrap gap-1 justify-end">
                       {['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#d946ef', '#06b6d4'].map(c => (
                         <button
                           key={c}
                           onClick={() => setSettings({...settings, color: c})}
-                          className={`w-8 h-8 rounded transform transition-transform duration-200 ${
+                          className={`w-6 h-6 rounded transform transition-transform duration-200 ${
                             settings.color === c ? 'scale-110 ring-2 ring-white shadow-lg' : 'hover:scale-105 opacity-60 hover:opacity-100'
                           }`}
                           style={{backgroundColor: c}}
@@ -231,10 +255,10 @@ const App: React.FC = () => {
               {/* START BUTTON */}
               <button 
                 onClick={startGame}
-                className="group relative w-full mt-4 bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white font-black italic text-2xl py-5 rounded-xl shadow-[0_0_20px_rgba(6,182,212,0.4)] transform transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(6,182,212,0.6)] border-t border-cyan-400 overflow-hidden"
+                className="group relative w-full mt-2 bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white font-black italic text-xl py-4 rounded-xl shadow-[0_0_20px_rgba(6,182,212,0.4)] transform transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(6,182,212,0.6)] border-t border-cyan-400 overflow-hidden"
               >
                 <span className="relative z-10 flex items-center justify-center">
-                  <Play size={28} className="mr-3 fill-current" /> 
+                  <Play size={24} className="mr-3 fill-current" /> 
                   START ENGINE
                 </span>
                 {/* Shine effect */}
@@ -246,10 +270,10 @@ const App: React.FC = () => {
           
           {/* Leaderboard (Collapsible) */}
           {scores.length > 0 && (
-             <div className="mt-6 w-full max-w-lg bg-black/60 backdrop-blur-md border-t border-gray-800 rounded-xl overflow-hidden animate-in slide-in-from-bottom-10 fade-in duration-700 transition-all shadow-lg">
+             <div className="mt-4 w-full max-w-lg bg-black/60 backdrop-blur-md border-t border-gray-800 rounded-xl overflow-hidden animate-in slide-in-from-bottom-10 fade-in duration-700 transition-all shadow-lg">
                 <button 
                   onClick={() => setIsLeaderboardExpanded(!isLeaderboardExpanded)}
-                  className="w-full flex justify-between items-center p-4 hover:bg-white/5 transition-colors focus:outline-none"
+                  className="w-full flex justify-between items-center p-3 hover:bg-white/5 transition-colors focus:outline-none"
                 >
                     <div className="flex items-center text-xs font-bold text-gray-400 uppercase tracking-[0.2em]">
                         <Trophy size={14} className="mr-2 text-yellow-500"/> 

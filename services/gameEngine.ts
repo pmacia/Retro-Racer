@@ -1,6 +1,6 @@
 
-import { Car, Segment, Point3D, ProjectPoint, Difficulty } from '../types';
-import { TRACK_LENGTH, SEGMENT_LENGTH, ROAD_WIDTH, COLORS, TRACK_LAYOUT, OBSTACLES } from '../constants';
+import { Car, Segment, Point3D, ProjectPoint, Difficulty, TrackDefinition } from '../types';
+import { SEGMENT_LENGTH, ROAD_WIDTH, COLORS, OBSTACLES } from '../constants';
 
 // --- Math Helpers ---
 const easeIn = (a: number, b: number, percent: number) => a + (b - a) * Math.pow(percent, 2);
@@ -23,11 +23,12 @@ export const project = (p: Point3D, cameraX: number, cameraY: number, cameraZ: n
 };
 
 // --- Track Generation ---
-export const createTrack = (): Segment[] => {
+export const createTrack = (trackDef: TrackDefinition): Segment[] => {
   const segments: Segment[] = [];
-  
+  const layout = trackDef.layout;
+
   // 1. Create Segments from Layout
-  TRACK_LAYOUT.forEach(section => {
+  layout.forEach(section => {
     const curveStrength = section.curve || 0;
     
     for (let i = 0; i < section.length; i++) {
@@ -35,7 +36,7 @@ export const createTrack = (): Segment[] => {
           index: segments.length,
           p1: { x: 0, y: 0, z: segments.length * SEGMENT_LENGTH },
           p2: { x: 0, y: 0, z: (segments.length + 1) * SEGMENT_LENGTH },
-          curve: curveStrength, // Basic curve
+          curve: curveStrength, 
           mapX: 0, 
           mapY: 0,
           color: { road: '', grass: '', rumble: '' },
@@ -65,10 +66,12 @@ export const createTrack = (): Segment[] => {
   let mapX = 0;
   let mapY = 0;
   let mapAngle = 0; // 0 is North
-  // Calculate total curve area to normalize to 2PI (360deg)
-  // We want the track to loop perfectly on the map.
+  
+  // Calculate total curve integral to roughly close the loop or at least display relative direction
   const totalCurveIntegral = segments.reduce((acc, s) => acc + s.curve, 0);
-  const anglePerCurveUnit = (Math.PI * 2) / totalCurveIntegral;
+  // Empirically, ~300 curve units is a full circle in this engine logic, 
+  // but since we allow arbitrary tracks, we just normalize step for visibility.
+  const anglePerCurveUnit = 0.015; // Adjusted scale for mini-map rotation
 
   segments.forEach(seg => {
       seg.mapX = mapX;
@@ -78,7 +81,6 @@ export const createTrack = (): Segment[] => {
       mapAngle += angleStep;
       
       // Move 'forward' relative to map coordinates. 
-      // Scale down segment length for map view
       const mapScale = 0.5; 
       mapX += Math.sin(mapAngle) * mapScale;
       mapY -= Math.cos(mapAngle) * mapScale;
@@ -92,17 +94,21 @@ export const createTrack = (): Segment[] => {
 
   // Add Random Obstacles
   segments.forEach((seg, i) => {
-      if (i % 20 === 0 && i > 50 && i < segments.length - 50) {
-          const type = Math.random() > 0.5 ? 'BOULDER' : 'TREE';
-          const spriteData = OBSTACLES.find(o => o.type === type);
-          if (spriteData) {
-              const offset = (Math.random() * 3 + 1.2) * (Math.random() > 0.5 ? 1 : -1);
-              seg.sprites.push({
-                  source: type,
-                  offset: offset,
-                  width: spriteData.width,
-                  height: spriteData.height
-              });
+      // Don't put obstacles at start or end
+      if (i > 50 && i < segments.length - 50) {
+          // Probability
+          if (i % 20 === 0 && Math.random() > 0.4) {
+              const type = Math.random() > 0.5 ? 'BOULDER' : 'TREE';
+              const spriteData = OBSTACLES.find(o => o.type === type);
+              if (spriteData) {
+                  const offset = (Math.random() * 3 + 1.2) * (Math.random() > 0.5 ? 1 : -1);
+                  seg.sprites.push({
+                      source: type,
+                      offset: offset,
+                      width: spriteData.width,
+                      height: spriteData.height
+                  });
+              }
           }
       }
   });
