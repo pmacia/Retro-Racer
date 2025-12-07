@@ -108,6 +108,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         c.fill();
     };
 
+    // Helper: Draw Mountains
+    const drawMountains = (c: CanvasRenderingContext2D) => {
+       const h = HEIGHT / 2;
+       c.fillStyle = COLORS.MOUNTAIN;
+       c.beginPath();
+       c.moveTo(0, h);
+       
+       // Deterministic peaks based on screen width
+       for (let i = 0; i <= WIDTH; i += 20) {
+           // Simple pseudo-random height based on x position
+           const seed = i * 0.05;
+           // Reduced height for a more subtle, distant look
+           const peakHeight = Math.sin(seed) * 10 + Math.cos(seed * 2.5) * 5 + 15;
+           c.lineTo(i, h - peakHeight);
+       }
+       c.lineTo(WIDTH, h);
+       c.closePath();
+       c.fill();
+    };
+
     // Helper: Draw Car Model
     const drawCar = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, angle: number = 0) => {
         ctx.save();
@@ -199,10 +219,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       }
 
       // --- Rendering ---
+      // 1. Sky
       ctx.fillStyle = COLORS.SKY;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
       
-      // Solid Ground
+      // 2. Mountains (Horizon)
+      drawMountains(ctx);
+
+      // 3. Ground (Base)
       ctx.fillStyle = COLORS.LIGHT.grass;
       ctx.fillRect(0, HEIGHT / 2, WIDTH, HEIGHT / 2);
 
@@ -339,6 +363,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             maxY = p2.y; // Update Horizon clip to top of this segment
         }
 
+        // Fill gap between last segment and horizon with road color (fixes "floating road" look)
+        if (maxY > HEIGHT / 2) {
+             const lastSegIdx = (baseSegmentIndex + VISIBILITY) % TRACK_LENGTH;
+             ctx.fillStyle = trackRef.current[lastSegIdx].color.road;
+             ctx.fillRect(0, HEIGHT / 2, WIDTH, maxY - HEIGHT / 2);
+        }
+
         // --- DRAW SPRITES & CARS ---
         // Paint back to front
         for (let n = VISIBILITY - 1; n >= 0; n--) {
@@ -393,23 +424,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
                 } 
                 // Render Boulders
                 else if (sprite.source === 'BOULDER') {
-                    // Shadow
-                    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                    // Shadow (Slightly larger and flatter to ground it)
+                    ctx.fillStyle = 'rgba(0,0,0,0.4)';
                     ctx.beginPath();
-                    ctx.ellipse(spriteX, spriteY, sW * 0.5, sW * 0.15, 0, 0, Math.PI * 2);
+                    ctx.ellipse(spriteX, spriteY, sW * 0.55, sW * 0.15, 0, 0, Math.PI * 2);
                     ctx.fill();
 
                     // Rock body
+                    // Using a quadratic curve that explicitly starts and ends on the ground line (spriteY)
+                    // This prevents the "floating" effect caused by circles/arcs not touching the baseline.
                     ctx.fillStyle = '#666';
                     ctx.beginPath();
-                    ctx.arc(spriteX, spriteY - sH * 0.4, sW * 0.4, 0, Math.PI, true);
-                    ctx.lineTo(spriteX - sW * 0.4, spriteY);
+                    ctx.moveTo(spriteX - sW * 0.45, spriteY);
+                    // Control point is high in the middle to create a hump
+                    ctx.quadraticCurveTo(spriteX, spriteY - sH * 1.2, spriteX + sW * 0.45, spriteY);
+                    ctx.closePath();
                     ctx.fill();
                     
-                    // Highlight
+                    // Highlight (Top left)
                     ctx.fillStyle = '#888';
                     ctx.beginPath();
-                    ctx.arc(spriteX - sW * 0.1, spriteY - sH * 0.5, sW * 0.15, 0, Math.PI * 2);
+                    ctx.ellipse(spriteX - sW * 0.15, spriteY - sH * 0.5, sW * 0.15, sH * 0.1, Math.PI / 4, 0, Math.PI * 2);
                     ctx.fill();
                 }
             });
