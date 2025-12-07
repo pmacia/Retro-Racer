@@ -1,4 +1,3 @@
-
 import { Car, Segment, Point3D, ProjectPoint, Difficulty, TrackDefinition } from '../types';
 import { SEGMENT_LENGTH, ROAD_WIDTH, COLORS, OBSTACLES } from '../constants';
 
@@ -62,17 +61,13 @@ export const createTrack = (trackDef: TrackDefinition): Segment[] => {
     }
   });
 
-  // 2. Map Generation (2D Coordinates)
+  // 2. Map Generation (2D Coordinates) with Loop Closure
   let mapX = 0;
   let mapY = 0;
   let mapAngle = 0; // 0 is North
-  
-  // Calculate total curve integral to roughly close the loop or at least display relative direction
-  const totalCurveIntegral = segments.reduce((acc, s) => acc + s.curve, 0);
-  // Empirically, ~300 curve units is a full circle in this engine logic, 
-  // but since we allow arbitrary tracks, we just normalize step for visibility.
-  const anglePerCurveUnit = 0.015; // Adjusted scale for mini-map rotation
+  const anglePerCurveUnit = 0.015; // Scale for rotation
 
+  // First Pass: Calculate raw coordinates
   segments.forEach(seg => {
       seg.mapX = mapX;
       seg.mapY = mapY;
@@ -84,6 +79,21 @@ export const createTrack = (trackDef: TrackDefinition): Segment[] => {
       const mapScale = 0.5; 
       mapX += Math.sin(mapAngle) * mapScale;
       mapY -= Math.cos(mapAngle) * mapScale;
+  });
+
+  // Loop Closure Logic:
+  // Calculate the gap between the last point and the start (0,0)
+  // And distribute that error across all segments to force a closed loop.
+  const endX = mapX;
+  const endY = mapY;
+  // We want endX/endY to be 0,0 (same as start).
+  // The error is exactly endX, endY.
+  
+  segments.forEach((seg, i) => {
+      const percent = i / segments.length;
+      // Subtract the proportional error
+      seg.mapX -= (endX * percent);
+      seg.mapY -= (endY * percent);
   });
 
   // 3. Decoration & Obstacles

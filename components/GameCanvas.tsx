@@ -8,7 +8,7 @@ import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Gauge, Timer, Flag, Map as M
 interface GameCanvasProps {
   status: GameStatus;
   settings: PlayerSettings;
-  onFinish: (time: number, totalDistance: number) => void;
+  onFinish: (time: number, totalDistance: number, rank: number, winnerName: string) => void;
   isPaused: boolean;
   bestSpeed?: number; // Passed to adjust AI difficulty if needed
 }
@@ -216,12 +216,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       const player = carsRef.current[0];
       const trackLen = trackRef.current.length;
       
-      // Check Finish
-      if (player.finished) {
+      // Check Finish - Ends when ANY car finishes the required laps
+      // We look for the first car that has finished = true
+      const winner = carsRef.current.find(c => c.finished);
+
+      if (winner) {
           const totalTime = (Date.now() - startTimeRef.current) / 1000;
           const totalDistance = trackRef.current.length * SEGMENT_LENGTH * settings.laps;
-          onFinish(totalTime, totalDistance);
-          return; // Stop rendering
+          const rank = winner.isPlayer ? 1 : 2;
+          onFinish(totalTime, totalDistance, rank, winner.name);
+          return; // Stop rendering loop
       }
 
       // --- Rendering ---
@@ -262,8 +266,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
           
-          // Border
-          ctx.lineWidth = 140;
+          // Border (Reduced Size)
+          ctx.lineWidth = 3; // was 6
           ctx.strokeStyle = '#333';
           ctx.beginPath();
           ctx.moveTo(trackRef.current[0].mapX, trackRef.current[0].mapY);
@@ -271,24 +275,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
           ctx.closePath();
           ctx.stroke();
 
-          // Tarmac
-          ctx.lineWidth = 100;
+          // Tarmac (Reduced Size)
+          ctx.lineWidth = 2; // was 4
           ctx.strokeStyle = '#666';
           ctx.stroke();
 
-          // Obstacles
+          // Obstacles (Full view - Reduced Size)
           trackRef.current.forEach(seg => {
              seg.sprites.forEach(spr => {
-                 const ox = seg.mapX + Math.cos(0) * spr.offset * 100; // Simplified offset
-                 const oy = seg.mapY + Math.sin(0) * spr.offset * 100;
-                 ctx.fillStyle = spr.source === 'TREE' ? '#0d4013' : '#666';
+                 // Scale offset to keep dots near the line
+                 const ox = seg.mapX + Math.cos(0) * spr.offset * 2; 
+                 const oy = seg.mapY + Math.sin(0) * spr.offset * 2;
+                 ctx.fillStyle = spr.source === 'TREE' ? '#10b981' : '#9ca3af';
                  ctx.beginPath();
-                 ctx.arc(ox, oy, 20, 0, Math.PI*2);
+                 ctx.arc(ox, oy, 0.75, 0, Math.PI*2); // was 1.5
                  ctx.fill();
              });
           });
 
-          // Cars
+          // Cars (Reduced Size)
           carsRef.current.forEach(car => {
               const segIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackLen;
               const seg = trackRef.current[segIdx];
@@ -300,11 +305,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
               ctx.translate(seg.mapX, seg.mapY);
               ctx.rotate(angle + Math.PI/2);
               ctx.fillStyle = car.color;
-              ctx.fillRect(-20, -30, 40, 60);
+              
+              const carW = 1; // was 2
+              const carH = 1.75; // was 3.5
+
+              ctx.fillRect(-carW/2, -carH/2, carW, carH);
               // Outline for visibility
-              ctx.lineWidth = 4;
+              ctx.lineWidth = 0.25; // was 0.5
               ctx.strokeStyle = 'white';
-              ctx.strokeRect(-20, -30, 40, 60);
+              ctx.strokeRect(-carW/2, -carH/2, carW, carH);
               ctx.restore();
           });
           
@@ -493,10 +502,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         ctx.strokeRect(mapX, mapY, mapSize, mapSize);
 
         ctx.save();
+        
+        // Auto-scale logic for HUD Minimap
+        let mmMinX = Infinity, mmMaxX = -Infinity, mmMinY = Infinity, mmMaxY = -Infinity;
+        trackRef.current.forEach(s => {
+            if (s.mapX < mmMinX) mmMinX = s.mapX;
+            if (s.mapX > mmMaxX) mmMaxX = s.mapX;
+            if (s.mapY < mmMinY) mmMinY = s.mapY;
+            if (s.mapY > mmMaxY) mmMaxY = s.mapY;
+        });
+        const mapTrackW = mmMaxX - mmMinX;
+        const mapTrackH = mmMaxY - mmMinY;
+        // Fit track inside mapSize with padding
+        const scale = Math.min((mapSize - 20) / mapTrackW, (mapSize - 20) / mapTrackH);
+        
         ctx.translate(mapX + mapSize/2, mapY + mapSize/2);
-        ctx.scale(0.045, 0.045);
+        ctx.scale(scale, scale);
+        ctx.translate(-(mmMinX + mapTrackW/2), -(mmMinY + mapTrackH/2));
 
-        ctx.lineWidth = 60;
+        // Draw Road Line (Reduced Size)
+        ctx.lineWidth = 2.5; // was 5
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.strokeStyle = '#555';
@@ -510,25 +535,42 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         }
         ctx.stroke();
         
-        // Highlight Road
-        ctx.lineWidth = 40;
+        // Highlight Road Inner (Reduced Size)
+        ctx.lineWidth = 1.5; // was 3
         ctx.strokeStyle = '#999';
         ctx.stroke();
 
-        // Player Dot
+        // Draw Obstacles on Minimap (Dots - Reduced Size)
+        trackRef.current.forEach(seg => {
+             seg.sprites.forEach(spr => {
+                 const ox = seg.mapX + (spr.offset > 0 ? 3 : -3); 
+                 const oy = seg.mapY; 
+                 // Trees = Green dots, Boulders = Grey dots
+                 ctx.fillStyle = spr.source === 'TREE' ? '#10b981' : '#9ca3af';
+                 ctx.beginPath();
+                 ctx.arc(ox, oy, 1, 0, Math.PI*2); // was 2
+                 ctx.fill();
+             });
+        });
+
+        // Player Dot (Reduced Size)
         const playerSeg = trackRef.current[baseSegmentIndex];
         ctx.fillStyle = player.color;
         ctx.beginPath();
-        ctx.arc(playerSeg.mapX, playerSeg.mapY, 80, 0, Math.PI*2);
+        ctx.arc(playerSeg.mapX, playerSeg.mapY, 2, 0, Math.PI*2); // was 4
         ctx.fill();
+        // Player Arrow (Optional direction)
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 1;
+        ctx.stroke();
 
-        // Rival Dot
+        // Rival Dot (Reduced Size)
         const rival = carsRef.current[1];
         const rivalSegIdx = Math.floor(rival.z / SEGMENT_LENGTH) % trackLen;
         const rivalSeg = trackRef.current[rivalSegIdx];
         ctx.fillStyle = rival.color;
         ctx.beginPath();
-        ctx.arc(rivalSeg.mapX, rivalSeg.mapY, 80, 0, Math.PI*2);
+        ctx.arc(rivalSeg.mapX, rivalSeg.mapY, 2, 0, Math.PI*2); // was 4
         ctx.fill();
 
         ctx.restore();

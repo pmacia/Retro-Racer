@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, Pause, RotateCcw, Trophy, CarFront, Flag, Signal, Gauge, Zap, ChevronDown, ChevronUp, Map, Dna } from 'lucide-react';
+import { Play, Pause, RotateCcw, Trophy, CarFront, Flag, Signal, Gauge, Zap, ChevronDown, ChevronUp, Map, Dna, Frown } from 'lucide-react';
 import GameCanvas from './components/GameCanvas';
 import { GameStatus, PlayerSettings, Score, Difficulty } from './types';
 import { saveScore, getScores } from './services/storageService';
@@ -17,6 +17,8 @@ const App: React.FC = () => {
   const [scores, setScores] = useState<Score[]>(getScores());
   const [finalTime, setFinalTime] = useState<number>(0);
   const [finalSpeed, setFinalSpeed] = useState<number>(0);
+  const [finalRank, setFinalRank] = useState<number>(1);
+  const [winnerName, setWinnerName] = useState<string>('');
   const [isLeaderboardExpanded, setIsLeaderboardExpanded] = useState<boolean>(false);
 
   // Calculate best speed to pass to game engine for AI scaling
@@ -29,19 +31,26 @@ const App: React.FC = () => {
     else if (status === GameStatus.PAUSED) setStatus(GameStatus.PLAYING);
   };
 
-  const handleFinish = (time: number, totalDistance: number) => {
+  const handleFinish = (time: number, totalDistance: number, rank: number, winner: string) => {
     // Note: totalDistance is passed from GameCanvas based on the generated track length
     const avgSpeedUnits = totalDistance / time;
     const avgSpeedKmh = avgSpeedUnits / 100;
 
-    const newScores = saveScore({
-      name: settings.name.toUpperCase(),
-      avgSpeed: avgSpeedKmh,
-      date: new Date().toLocaleDateString()
-    });
-    setScores(newScores);
     setFinalTime(time);
     setFinalSpeed(avgSpeedKmh);
+    setFinalRank(rank);
+    setWinnerName(winner);
+
+    // Only save score if Player 1 Won (Rank 1)
+    if (rank === 1) {
+      const newScores = saveScore({
+        name: settings.name.toUpperCase(),
+        avgSpeed: avgSpeedKmh,
+        date: new Date().toLocaleDateString()
+      });
+      setScores(newScores);
+    }
+    
     setStatus(GameStatus.GAME_OVER);
   };
 
@@ -331,18 +340,22 @@ const App: React.FC = () => {
       {/* --- GAME OVER --- */}
       {status === GameStatus.GAME_OVER && (
         <div className="absolute inset-0 z-30 bg-black/80 backdrop-blur-lg flex items-center justify-center p-4 animate-in zoom-in duration-300">
-          <div className="bg-gray-900 border border-gray-700 p-8 rounded-2xl w-full max-w-lg shadow-2xl relative overflow-hidden">
+          <div className={`bg-gray-900 border p-8 rounded-2xl w-full max-w-lg shadow-2xl relative overflow-hidden ${finalRank === 1 ? 'border-yellow-500/50' : 'border-red-500/50'}`}>
             
             {/* Background Glow */}
-            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 via-cyan-500 to-green-400"></div>
+            <div className={`absolute top-0 left-0 w-full h-2 bg-gradient-to-r ${finalRank === 1 ? 'from-green-400 via-yellow-500 to-green-400' : 'from-red-900 via-red-600 to-red-900'}`}></div>
 
-            <h2 className="text-5xl font-black text-center text-white mb-2 italic tracking-tighter drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">
-              FINISH LINE
+            <h2 className={`text-6xl font-black text-center mb-2 italic tracking-tighter drop-shadow-lg ${finalRank === 1 ? 'text-yellow-400' : 'text-red-500'}`}>
+              {finalRank === 1 ? 'VICTORY' : 'DEFEAT'}
             </h2>
+
+            <p className="text-center text-gray-400 mb-6 font-bold tracking-widest uppercase text-sm">
+                {finalRank === 1 ? 'CHAMPION OF THE TRACK' : `WINNER: ${winnerName}`}
+            </p>
             
             <div className="flex justify-center mb-8">
                <div className="bg-gray-800 rounded-full px-4 py-1 flex items-center gap-2 border border-gray-700">
-                  <Flag className="text-green-500" size={16}/>
+                  <Flag className={finalRank === 1 ? "text-yellow-500" : "text-red-500"} size={16}/>
                   <span className="text-gray-300 font-bold text-sm tracking-widest">{settings.laps} LAPS COMPLETED</span>
                </div>
             </div>
@@ -352,33 +365,32 @@ const App: React.FC = () => {
                     <p className="text-gray-500 text-xs font-bold uppercase mb-1">Total Time</p>
                     <p className="text-3xl font-mono text-white tracking-widest">{finalTime.toFixed(2)}<span className="text-sm text-gray-600">s</span></p>
                 </div>
-                <div className="bg-black/40 p-4 rounded-xl border border-green-900/50 text-center relative overflow-hidden">
-                    <div className="absolute inset-0 bg-green-500/5"></div>
-                    <p className="text-green-500 text-xs font-bold uppercase mb-1">Avg Speed</p>
-                    <p className="text-3xl font-mono text-green-400 tracking-widest drop-shadow-[0_0_5px_rgba(74,222,128,0.5)]">
-                      {finalSpeed.toFixed(0)} <span className="text-sm text-green-700">km/h</span>
+                <div className={`bg-black/40 p-4 rounded-xl border text-center relative overflow-hidden ${finalRank === 1 ? 'border-green-900/50' : 'border-red-900/50'}`}>
+                    <div className={`absolute inset-0 ${finalRank === 1 ? 'bg-green-500/5' : 'bg-red-500/5'}`}></div>
+                    <p className={`text-xs font-bold uppercase mb-1 ${finalRank === 1 ? 'text-green-500' : 'text-red-500'}`}>Avg Speed</p>
+                    <p className={`text-3xl font-mono tracking-widest ${finalRank === 1 ? 'text-green-400' : 'text-red-400'}`}>
+                      {finalSpeed.toFixed(0)} <span className={`text-sm ${finalRank === 1 ? 'text-green-700' : 'text-red-700'}`}>km/h</span>
                     </p>
                 </div>
             </div>
 
-            <div className="bg-black/40 rounded-xl p-6 mb-8 border border-gray-800">
-               <h3 className="text-gray-500 text-xs font-bold mb-4 uppercase tracking-[0.2em] text-center border-b border-gray-800 pb-2">Session Ranking</h3>
-               <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                 {scores.map((s, i) => (
-                   <div key={i} className={`flex justify-between items-center py-2 px-3 rounded ${s.avgSpeed === finalSpeed && s.name === settings.name ? 'bg-green-900/20 border border-green-500/30' : ''}`}>
-                     <div className="flex items-center">
-                        <span className="text-gray-500 font-mono w-6 text-sm">{i+1}.</span>
-                        <span className={`font-mono text-sm ${s.name === settings.name ? 'text-white font-bold' : 'text-gray-400'}`}>{s.name}</span>
-                     </div>
-                     <span className="font-mono text-cyan-500 text-sm">{s.avgSpeed.toFixed(0)} km/h</span>
-                   </div>
-                 ))}
-               </div>
-            </div>
+            {/* Score Saved Notification */}
+            {finalRank === 1 ? (
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-8 text-center">
+                    <p className="text-yellow-200 text-xs font-bold tracking-wider">NEW RECORD SAVED!</p>
+                </div>
+            ) : (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-8 text-center flex items-center justify-center gap-2">
+                    <Frown size={16} className="text-red-400"/>
+                    <p className="text-red-200 text-xs font-bold tracking-wider">RECORD NOT SAVED (DID NOT WIN)</p>
+                </div>
+            )}
 
             <button 
               onClick={resetGame}
-              className="w-full bg-white text-black hover:bg-gray-200 font-black italic text-xl py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.3)] transition transform hover:scale-[1.02] flex items-center justify-center"
+              className={`w-full text-black font-black italic text-xl py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition transform hover:scale-[1.02] flex items-center justify-center ${
+                  finalRank === 1 ? 'bg-yellow-400 hover:bg-yellow-300' : 'bg-gray-300 hover:bg-white'
+              }`}
             >
               <RotateCcw size={24} className="mr-2" /> PLAY AGAIN
             </button>
