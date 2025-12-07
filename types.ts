@@ -6,15 +6,22 @@ export enum GameStatus {
   GAME_OVER = 'GAME_OVER',
 }
 
+export enum Difficulty {
+  ROOKIE = 'ROOKIE',   // Principiante
+  AMATEUR = 'AMATEUR', // Medio
+  PRO = 'PRO'          // Profesional
+}
+
 export interface PlayerSettings {
   name: string;
   color: string;
   laps: number;
+  difficulty: Difficulty;
 }
 
 export interface Score {
   name: string;
-  time: number; // seconds
+  avgSpeed: number; // km/h (average)
   date: string;
 }
 

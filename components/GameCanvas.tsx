@@ -1,17 +1,19 @@
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { GameStatus, PlayerSettings, Car, Segment } from '../types';
 import { createTrack, createCars, updateGame, project } from '../services/gameEngine';
 import { WIDTH, HEIGHT, TRACK_LENGTH, SEGMENT_LENGTH, ROAD_WIDTH, CAMERA_DEPTH, VISIBILITY, COLORS } from '../constants';
+import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
 
 interface GameCanvasProps {
   status: GameStatus;
   settings: PlayerSettings;
   onFinish: (time: number) => void;
   isPaused: boolean;
+  bestSpeed?: number; // Passed to adjust AI difficulty if needed
 }
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isPaused }) => {
+const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isPaused, bestSpeed }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   // Game State
@@ -21,19 +23,43 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
   const startTimeRef = useRef<number>(0);
   const frameIdRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+  
+  // Countdown State
+  const [countdown, setCountdown] = useState<number>(3);
+  const isRacingRef = useRef<boolean>(false);
 
   // Initialize
   useEffect(() => {
     if (status === GameStatus.PLAYING && carsRef.current.length === 0) {
-      carsRef.current = createCars(settings.color, settings.name);
+      // Create cars using difficulty and passing the best recorded speed
+      carsRef.current = createCars(settings.color, settings.name, settings.difficulty, bestSpeed);
       trackRef.current = createTrack();
-      startTimeRef.current = Date.now();
-      lastTimeRef.current = Date.now();
+      
+      // Reset Countdown
+      setCountdown(3);
+      isRacingRef.current = false;
+      
+      // Start Countdown Timer
+      let count = 3;
+      const interval = setInterval(() => {
+        count--;
+        setCountdown(count);
+        if (count <= 0) {
+          clearInterval(interval);
+          isRacingRef.current = true;
+          startTimeRef.current = Date.now();
+          lastTimeRef.current = Date.now(); // Avoid huge dt jump
+        }
+      }, 1000);
+
+      return () => clearInterval(interval);
+
     } else if (status === GameStatus.MENU) {
       carsRef.current = [];
       trackRef.current = [];
+      isRacingRef.current = false;
     }
-  }, [status, settings]);
+  }, [status, settings, bestSpeed]);
 
   // Inputs
   useEffect(() => {
@@ -50,6 +76,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       window.removeEventListener('keyup', (e) => handleKey(e, false));
     };
   }, []);
+
+  const handleTouchInput = (action: 'up' | 'down' | 'left' | 'right', isPressed: boolean) => {
+      inputRef.current[action] = isPressed;
+  };
 
   // Main Loop
   useEffect(() => {
@@ -71,6 +101,58 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         c.fill();
     };
 
+    // Helper: Draw Car Model
+    const drawCar = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string) => {
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(x, y - h*0.05, w * 0.55, h * 0.1, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Wheels
+        const wheelW = w * 0.13;
+        const wheelH = h * 0.35;
+        const wheelY = y - wheelH * 0.85;
+        const wheelOffsetX = w * 0.4;
+        
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(x - wheelOffsetX - wheelW, wheelY, wheelW, wheelH); // L
+        ctx.fillRect(x + wheelOffsetX, wheelY, wheelW, wheelH); // R
+
+        // Body (Main block)
+        const bodyH = h * 0.6;
+        const bodyY = y - bodyH * 1.1; // Lift slightly for wheels
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x - w/2, bodyY, w, bodyH, w*0.08);
+        else ctx.rect(x - w/2, bodyY, w, bodyH);
+        ctx.fill();
+
+        // Cabin (Top)
+        const cabinW = w * 0.65;
+        const cabinH = h * 0.35;
+        const cabinY = bodyY - cabinH * 0.9;
+        ctx.fillStyle = '#222';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x - cabinW/2, cabinY, cabinW, cabinH, [w*0.1, w*0.1, 0, 0]);
+        else ctx.rect(x - cabinW/2, cabinY, cabinW, cabinH);
+        ctx.fill();
+
+        // Lights
+        const lightW = w * 0.16;
+        const lightH = h * 0.15;
+        const lightY = bodyY + bodyH * 0.3;
+        ctx.fillStyle = '#cc0000';
+        ctx.fillRect(x - w*0.4, lightY, lightW, lightH);
+        ctx.fillRect(x + w*0.4 - lightW, lightY, lightW, lightH);
+        
+        // Shine/Highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x - w*0.4, bodyY, w*0.8, bodyH*0.2, w*0.02);
+        ctx.fill();
+    };
+
     const render = () => {
       if (isPaused) {
           frameIdRef.current = requestAnimationFrame(render);
@@ -81,8 +163,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       const dt = Math.min(1, (now - lastTimeRef.current) / 1000);
       lastTimeRef.current = now;
 
-      // Update Physics
-      updateGame(carsRef.current, trackRef.current, inputRef.current, dt, settings.laps);
+      // Update Physics ONLY if countdown is finished
+      if (isRacingRef.current) {
+        updateGame(carsRef.current, trackRef.current, inputRef.current, dt, settings.laps);
+      }
       
       const player = carsRef.current[0];
       
@@ -90,7 +174,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       if (player.finished) {
           const totalTime = (Date.now() - startTimeRef.current) / 1000;
           onFinish(totalTime);
-          return;
+          return; // Stop rendering
       }
 
       // --- Rendering ---
@@ -126,11 +210,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         const segmentZ = (segment.index * SEGMENT_LENGTH + loopZ) - cameraZ;
 
         // Project
-        // We project world coordinates relative to the camera.
-        // WorldX of road center is 'x' (accumulated curve).
-        // CameraX is 'cameraX'.
-        // Input X = x - cameraX.
-        // Input Y = 0 (Road is at ground level).
         segment.clip = maxY;
         const p1 = project({x: x - cameraX, y: 0, z: segmentZ}, 0, cameraY, 0, CAMERA_DEPTH, WIDTH, HEIGHT, ROAD_WIDTH);
         const p2 = project({x: x + dx - cameraX, y: 0, z: segmentZ + SEGMENT_LENGTH}, 0, cameraY, 0, CAMERA_DEPTH, WIDTH, HEIGHT, ROAD_WIDTH);
@@ -142,8 +221,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         segment.screen = { x: p1.x, y: p1.y, w: p1.w };
 
         // Clipping check:
-        // Skip if the segment is completely below the horizon/previous segment (p2.y >= maxY)
-        // or if it's inverted/too close (p2.y >= p1.y in screen space, meaning "far" point is lower than "near" point)
         if (p2.y >= maxY || p2.y >= p1.y) continue;
         
         // Draw Road (w is half-width)
@@ -175,51 +252,85 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
 
         // 1. Static Sprites (Obstacles)
         segment.sprites.forEach(sprite => {
-            const spriteScale = segment.screen!.w / ROAD_WIDTH;
-            // Correct sprite positioning: 
-            // offset 0 is center. offset 1.0 is edge of road (w).
+            // Calculate scale based on road width ratio
+            const scale = segment.screen!.w / (ROAD_WIDTH / 2); 
+            
             const spriteX = segment.screen!.x + (sprite.offset * segment.screen!.w); 
             const spriteY = segment.screen!.y;
             
-            // Adjust size to look proportional
-            const sW = sprite.width * spriteScale * 5; 
-            const sH = sprite.height * spriteScale * 5;
+            const sW = sprite.width * scale; 
+            const sH = sprite.height * scale;
             
-            // Only draw if visible above ground
-            if (segment.clip !== undefined && spriteY > segment.clip) { 
-                 // optional strict clipping
-            }
-            
-            ctx.fillStyle = sprite.source === 'BOULDER' ? '#555' : '#1e4d2b';
-            ctx.fillRect(spriteX - sW/2, spriteY - sH, sW, sH);
-            
-            // Simple detail for tree
+            // Render Trees
             if (sprite.source === 'TREE') {
-                 ctx.fillStyle = '#0f2916';
+                // Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath();
+                ctx.ellipse(spriteX, spriteY, sW * 0.4, sW * 0.1, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Trunk
+                const trunkW = sW * 0.2;
+                const trunkH = sH * 0.2;
+                ctx.fillStyle = '#4A3728'; // Dark wood
+                ctx.fillRect(spriteX - trunkW/2, spriteY - trunkH, trunkW, trunkH);
+
+                // Foliage layers (Pine style)
+                const drawLayer = (y: number, w: number, h: number, color: string) => {
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.moveTo(spriteX - w/2, y);
+                    ctx.lineTo(spriteX, y - h);
+                    ctx.lineTo(spriteX + w/2, y);
+                    ctx.closePath();
+                    ctx.fill();
+                };
+
+                const startY = spriteY - trunkH * 0.8;
+                // Bottom
+                drawLayer(startY, sW, sH * 0.35, '#0d4013');
+                // Middle
+                drawLayer(startY - sH * 0.25, sW * 0.8, sH * 0.35, '#14521b');
+                // Top
+                drawLayer(startY - sH * 0.5, sW * 0.6, sH * 0.35, '#1a6622');
+            } 
+            // Render Boulders
+            else if (sprite.source === 'BOULDER') {
+                 // Shadow
+                 ctx.fillStyle = 'rgba(0,0,0,0.3)';
                  ctx.beginPath();
-                 ctx.moveTo(spriteX - sW/2, spriteY - sH * 0.3);
-                 ctx.lineTo(spriteX, spriteY - sH);
-                 ctx.lineTo(spriteX + sW/2, spriteY - sH * 0.3);
+                 ctx.ellipse(spriteX, spriteY, sW * 0.5, sW * 0.15, 0, 0, Math.PI * 2);
+                 ctx.fill();
+
+                 // Rock body
+                 ctx.fillStyle = '#666';
+                 ctx.beginPath();
+                 ctx.arc(spriteX, spriteY - sH * 0.4, sW * 0.4, 0, Math.PI, true);
+                 ctx.lineTo(spriteX - sW * 0.4, spriteY);
+                 ctx.fill();
+                 
+                 // Highlight
+                 ctx.fillStyle = '#888';
+                 ctx.beginPath();
+                 ctx.arc(spriteX - sW * 0.1, spriteY - sH * 0.5, sW * 0.15, 0, Math.PI * 2);
                  ctx.fill();
             }
         });
 
-        // 2. Cars
+        // 2. Cars (Rivals)
         carsRef.current.forEach(car => {
             if (car === player) return; // Draw player last
             const carSegIdx = Math.floor(car.z / SEGMENT_LENGTH) % TRACK_LENGTH;
             if (carSegIdx === i) {
-                const spriteScale = segment.screen!.w / ROAD_WIDTH;
+                const scale = segment.screen!.w / (ROAD_WIDTH / 2);
                 const carX = segment.screen!.x + (car.offset * segment.screen!.w); 
                 const carY = segment.screen!.y;
                 
-                const cW = 800 * spriteScale;
-                const cH = 400 * spriteScale;
+                // Scale width based on road width reference.
+                const cW = 400 * scale; 
+                const cH = cW * 0.45; // Aspect ratio
 
-                ctx.fillStyle = car.color;
-                ctx.fillRect(carX - cW/2, carY - cH, cW, cH);
-                ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                ctx.fillRect(carX - cW/2 + 2, carY - 4, cW - 4, 4); // shadow
+                drawCar(ctx, carX, carY, cW, cH, car.color);
             }
         });
       }
@@ -228,53 +339,60 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       const playerScreenY = HEIGHT - 80;
       const playerW = 340;
       const playerH = 140;
-      // Bounce effect
+      // Bounce effect only when moving
       const bounce = (2 * Math.random() * (player.speed / player.maxSpeed) * HEIGHT / 480) * (Math.random() > 0.5 ? 1 : -1);
-      
-      const pY = playerScreenY + bounce;
+      const pY = playerScreenY + (isRacingRef.current ? bounce : 0);
 
-      // Car Body
-      ctx.fillStyle = player.color;
-      // Main block
-      ctx.beginPath();
-      ctx.roundRect(WIDTH/2 - playerW/2, pY - playerH * 0.6, playerW, playerH * 0.6, 10);
-      ctx.fill();
+      drawCar(ctx, WIDTH/2, pY, playerW, playerH, player.color);
 
-      // Top/Cabin
-      ctx.fillStyle = '#111'; 
-      ctx.beginPath();
-      ctx.roundRect(WIDTH/2 - playerW/3, pY - playerH * 0.9, playerW * 0.66, playerH * 0.4, [10, 10, 0, 0]);
-      ctx.fill();
-      
-      // Wheels
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fillRect(WIDTH/2 - playerW/2 - 10, pY - 45, 30, 45); // L
-      ctx.fillRect(WIDTH/2 + playerW/2 - 20, pY - 45, 30, 45); // R
-      
-      // Lights
-      ctx.fillStyle = '#cc0000';
-      ctx.fillRect(WIDTH/2 - playerW/2 + 10, pY - playerH * 0.4, 40, 15);
-      ctx.fillRect(WIDTH/2 + playerW/2 - 50, pY - playerH * 0.4, 40, 15);
+      // --- DRAW COUNTDOWN ---
+      if (!isRacingRef.current && countdown > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+        
+        ctx.fillStyle = countdown === 0 ? '#22c55e' : '#eab308';
+        ctx.font = 'bold 200px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 8;
+        ctx.strokeText(countdown.toString(), WIDTH/2, HEIGHT/2);
+        ctx.fillText(countdown.toString(), WIDTH/2, HEIGHT/2);
+      }
+      if (!isRacingRef.current && countdown === 0) {
+         // Display "GO!" briefly
+         ctx.fillStyle = '#22c55e';
+         ctx.font = 'bold 200px sans-serif';
+         ctx.textAlign = 'center';
+         ctx.textBaseline = 'middle';
+         ctx.strokeStyle = 'white';
+         ctx.lineWidth = 8;
+         ctx.strokeText("YA!", WIDTH/2, HEIGHT/2);
+         ctx.fillText("YA!", WIDTH/2, HEIGHT/2);
+      }
+
 
       // --- HUD ---
-      ctx.fillStyle = 'white';
-      ctx.font = 'bold 24px monospace';
-      ctx.shadowColor = 'black';
-      ctx.shadowBlur = 4;
-      
-      // Speed
-      ctx.textAlign = 'left';
-      ctx.fillText(`SPEED: ${Math.floor(player.speed / 100)} km/h`, 30, 50);
-      
-      // Time
-      const time = (Date.now() - startTimeRef.current) / 1000;
-      ctx.textAlign = 'center';
-      ctx.fillText(`TIME: ${time.toFixed(2)}`, WIDTH/2, 50);
-      
-      // Laps
-      ctx.textAlign = 'right';
-      ctx.fillText(`VUELTA ${player.lap} / ${settings.laps}`, WIDTH - 30, 50);
-      ctx.shadowBlur = 0;
+      if (isRacingRef.current) {
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 24px monospace';
+        ctx.shadowColor = 'black';
+        ctx.shadowBlur = 4;
+        
+        // Speed
+        ctx.textAlign = 'left';
+        ctx.fillText(`SPEED: ${Math.floor(player.speed / 100)} km/h`, 30, 50);
+        
+        // Time
+        const time = (Date.now() - startTimeRef.current) / 1000;
+        ctx.textAlign = 'center';
+        ctx.fillText(`TIME: ${time.toFixed(2)}`, WIDTH/2, 50);
+        
+        // Laps
+        ctx.textAlign = 'right';
+        ctx.fillText(`VUELTA ${player.lap} / ${settings.laps}`, WIDTH - 30, 50);
+        ctx.shadowBlur = 0;
+      }
 
       // --- MINI MAP ---
       const mapSize = 160;
@@ -292,7 +410,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       // Center map in box
       ctx.translate(mapX + mapSize/2, mapY + mapSize/2);
       
-      // Auto-scale map to fit? We use fixed scale for now
+      // Auto-scale map to fit
       ctx.scale(0.045, 0.045);
 
       // Draw Track Segments
@@ -343,9 +461,60 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
 
     frameIdRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(frameIdRef.current);
-  }, [status, isPaused, onFinish, settings.laps]);
+  }, [status, isPaused, onFinish, settings.laps, settings.difficulty, bestSpeed, countdown]);
 
-  return <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="w-full h-full object-cover" />;
+  return (
+    <div className="relative w-full h-full touch-none select-none">
+      <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="w-full h-full object-cover block" />
+      
+      {/* Mobile Controls Overlay */}
+      {status === GameStatus.PLAYING && !isPaused && (
+          <div className="absolute inset-0 z-20 pointer-events-none lg:hidden flex flex-col justify-end p-6">
+              <div className="flex justify-between items-end">
+                  {/* Steering */}
+                  <div className="flex gap-6 pointer-events-auto">
+                      <button
+                          className="w-20 h-20 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center active:bg-white/30 transition-transform active:scale-95 shadow-xl"
+                          onPointerDown={(e) => { e.preventDefault(); handleTouchInput('left', true); }}
+                          onPointerUp={(e) => { e.preventDefault(); handleTouchInput('left', false); }}
+                          onPointerLeave={(e) => { e.preventDefault(); handleTouchInput('left', false); }}
+                      >
+                          <ArrowLeft className="w-10 h-10 text-white" />
+                      </button>
+                      <button
+                          className="w-20 h-20 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center active:bg-white/30 transition-transform active:scale-95 shadow-xl"
+                          onPointerDown={(e) => { e.preventDefault(); handleTouchInput('right', true); }}
+                          onPointerUp={(e) => { e.preventDefault(); handleTouchInput('right', false); }}
+                          onPointerLeave={(e) => { e.preventDefault(); handleTouchInput('right', false); }}
+                      >
+                          <ArrowRight className="w-10 h-10 text-white" />
+                      </button>
+                  </div>
+                  
+                  {/* Pedals */}
+                  <div className="flex flex-col gap-4 pointer-events-auto items-center">
+                      <button
+                          className="w-24 h-24 rounded-full bg-green-500/20 backdrop-blur-md border border-green-500/40 flex items-center justify-center active:bg-green-500/40 transition-transform active:scale-95 shadow-xl"
+                          onPointerDown={(e) => { e.preventDefault(); handleTouchInput('up', true); }}
+                          onPointerUp={(e) => { e.preventDefault(); handleTouchInput('up', false); }}
+                          onPointerLeave={(e) => { e.preventDefault(); handleTouchInput('up', false); }}
+                      >
+                          <ArrowUp className="w-12 h-12 text-green-100" />
+                      </button>
+                       <button
+                          className="w-16 h-16 rounded-full bg-red-500/20 backdrop-blur-md border border-red-500/40 flex items-center justify-center active:bg-red-500/40 transition-transform active:scale-95 shadow-xl"
+                          onPointerDown={(e) => { e.preventDefault(); handleTouchInput('down', true); }}
+                          onPointerUp={(e) => { e.preventDefault(); handleTouchInput('down', false); }}
+                          onPointerLeave={(e) => { e.preventDefault(); handleTouchInput('down', false); }}
+                      >
+                          <ArrowDown className="w-8 h-8 text-red-100" />
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+    </div>
+  );
 };
 
 export default GameCanvas;

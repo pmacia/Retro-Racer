@@ -1,5 +1,5 @@
 
-import { Car, Segment, Point3D, ProjectPoint } from '../types';
+import { Car, Segment, Point3D, ProjectPoint, Difficulty } from '../types';
 import { TRACK_LENGTH, SEGMENT_LENGTH, ROAD_WIDTH, COLORS, TRACK_LAYOUT, OBSTACLES } from '../constants';
 
 // --- Math Helpers ---
@@ -110,13 +110,45 @@ export const createTrack = (): Segment[] => {
   return segments;
 };
 
-export const createCars = (playerColor: string, playerName: string): Car[] => {
+export const createCars = (playerColor: string, playerName: string, difficulty: Difficulty, referenceAvgSpeedKmh: number = 0): Car[] => {
+  
+  // Calculate AI Max Speed based on Difficulty and Records
+  let aiMaxSpeed = 22000; // Default fallback
+  const referenceSpeedUnits = referenceAvgSpeedKmh * 100; // Convert km/h back to engine units
+
+  switch (difficulty) {
+    case Difficulty.ROOKIE:
+      // Fixed slow speed (~160 km/h)
+      aiMaxSpeed = 16000; 
+      break;
+    
+    case Difficulty.AMATEUR:
+      // 90% of best record, or default 200 km/h if no record
+      if (referenceSpeedUnits > 0) {
+        aiMaxSpeed = referenceSpeedUnits * 0.90;
+      } else {
+        aiMaxSpeed = 20000;
+      }
+      break;
+
+    case Difficulty.PRO:
+      // 105% of best record (Hard!), or default 235 km/h
+      if (referenceSpeedUnits > 0) {
+        aiMaxSpeed = referenceSpeedUnits * 1.05;
+      } else {
+        aiMaxSpeed = 23500;
+      }
+      // Cap at logical engine max to prevent physics breaking
+      aiMaxSpeed = Math.min(aiMaxSpeed, 25000); 
+      break;
+  }
+
   return [
     {
       offset: 0,
       z: 0,
       speed: 0,
-      maxSpeed: 24000,
+      maxSpeed: 24000, // Player max ~240km/h
       accel: 100,
       name: playerName,
       color: playerColor,
@@ -129,11 +161,11 @@ export const createCars = (playerColor: string, playerName: string): Car[] => {
     },
     {
       offset: -0.5,
-      z: 2000,
-      speed: 21500, // Slightly slower max speed
-      maxSpeed: 22000,
+      z: 2000, // Start slightly ahead
+      speed: aiMaxSpeed * 0.8, // Start with some speed
+      maxSpeed: aiMaxSpeed,
       accel: 80,
-      name: 'Rival CPU',
+      name: `CPU [${difficulty === Difficulty.PRO ? 'PRO' : difficulty === Difficulty.AMATEUR ? 'AVG' : 'NOOB'}]`,
       color: '#FF0000',
       isPlayer: false,
       isNpc: true,
@@ -162,15 +194,16 @@ export const updateGame = (cars: Car[], track: Segment[], input: { left: boolean
 
   // Steering & Centrifugal Force
   const speedRatio = (player.speed / player.maxSpeed);
-  const dx = dt * 2 * speedRatio; 
+  // Increase steering sensitivity (was 2)
+  const dx = dt * 2.8 * speedRatio; 
   
   if (input.left) player.offset -= dx;
   if (input.right) player.offset += dx;
   
   // Centrifugal force in curves (pulls car outwards)
-  // Reduced effect for better playability
+  // Drastically reduced effect to prevent "drift to left" feeling (was 1.15)
   if (playerSegment.curve !== 0 && player.speed > 0) {
-      player.offset -= (dx * playerSegment.curve * speedRatio * 1.5);
+      player.offset -= (dx * playerSegment.curve * speedRatio * 0.15);
   }
 
   // Off-road deceleration
@@ -195,27 +228,46 @@ export const updateGame = (cars: Car[], track: Segment[], input: { left: boolean
   if (rival && !rival.finished) {
       const rivalSeg = track[Math.floor(rival.z / SEGMENT_LENGTH) % track.length];
       
-      // Simple AI: accelerate and steer towards center
+      // AI Physics
       rival.speed = Math.min(rival.speed + rival.accel, rival.maxSpeed);
       
-      // Look ahead
-      const lookAheadIdx = (Math.floor(rival.z / SEGMENT_LENGTH) + 15) % track.length;
+      // Look ahead for curves
+      const lookAheadIdx = (Math.floor(rival.z / SEGMENT_LENGTH) + 20) % track.length;
       const futureCurve = track[lookAheadIdx].curve;
       
+      // Intelligent cornering
       let targetOffset = 0;
-      // Steer into curve early
-      if (futureCurve < 0) targetOffset = -0.5; // Left turn, hug left
-      if (futureCurve > 0) targetOffset = 0.5; // Right turn, hug right
-      
-      // Move towards target
-      if (rival.offset < targetOffset) rival.offset += dx * 0.8;
-      if (rival.offset > targetOffset) rival.offset -= dx * 0.8;
-      
-      // Apply curve force to AI too
-      if (rivalSeg.curve !== 0) {
-           rival.offset -= (dx * rivalSeg.curve * speedRatio * 1.5);
+      let braking = false;
+
+      // Prepare for curve
+      if (Math.abs(futureCurve) > 2) {
+         // Sharp curve ahead, slow down slightly
+         braking = true;
+         // Hug the inside
+         targetOffset = futureCurve > 0 ? 0.7 : -0.7; 
+      } else if (Math.abs(futureCurve) > 0) {
+         // Mild curve, just steer
+         targetOffset = futureCurve > 0 ? 0.4 : -0.4;
+      }
+
+      // Brake if needed
+      if (braking && rival.speed > rival.maxSpeed * 0.7) {
+          rival.speed -= rival.accel * 1.5;
       }
       
+      // Steer towards target (Apex)
+      if (rival.offset < targetOffset) rival.offset += dx * 0.9; // Slightly less agile than player
+      if (rival.offset > targetOffset) rival.offset -= dx * 0.9;
+      
+      // Apply curve force to AI too (balanced with player physics)
+      if (rivalSeg.curve !== 0) {
+           rival.offset -= (dx * rivalSeg.curve * speedRatio * 0.15);
+      }
+      
+      // Basic collision avoidance (keep in bounds)
+      if (rival.offset < -0.9) rival.offset += dx;
+      if (rival.offset > 0.9) rival.offset -= dx;
+
       rival.z += rival.speed * dt;
       if (rival.z >= trackLength) {
           rival.z -= trackLength;

@@ -1,6 +1,7 @@
+
 import { Score } from '../types';
 
-const STORAGE_KEY = 'retro_racer_scores';
+const STORAGE_KEY = 'retro_racer_scores_v2'; // Changed key to reset/migrate scores structure
 
 export const getScores = (): Score[] => {
   try {
@@ -15,8 +16,8 @@ export const getScores = (): Score[] => {
 export const saveScore = (newScore: Score): Score[] => {
   const scores = getScores();
   scores.push(newScore);
-  // Sort by time (ascending) and keep top 10
-  scores.sort((a, b) => a.time - b.time);
+  // Sort by Average Speed (Descending: Faster is better)
+  scores.sort((a, b) => b.avgSpeed - a.avgSpeed);
   const top10 = scores.slice(0, 10);
   
   try {
