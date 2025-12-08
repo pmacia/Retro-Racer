@@ -1,5 +1,6 @@
+
 import { Car, Segment, Point3D, ProjectPoint, Difficulty, TrackDefinition } from '../types';
-import { SEGMENT_LENGTH, ROAD_WIDTH, COLORS, OBSTACLES } from '../constants';
+import { SEGMENT_LENGTH, ROAD_WIDTH, COLORS, OBSTACLES, PHYSICS } from '../constants';
 
 // --- Math Helpers ---
 const easeIn = (a: number, b: number, percent: number) => a + (b - a) * Math.pow(percent, 2);
@@ -8,8 +9,6 @@ const easeInOut = (a: number, b: number, percent: number) => a + (b - a) * ((-Ma
 
 export const project = (p: Point3D, cameraX: number, cameraY: number, cameraZ: number, cameraDepth: number, width: number, height: number, roadWidth: number): ProjectPoint => {
   let dist = p.z - cameraZ;
-  // Clip behind camera. If dist is too small, clamp it to avoid infinity/inversion.
-  // Using a small positive number pushes it just in front of the lens.
   if (dist < 10) dist = 10;
 
   let scale = cameraDepth / dist;
@@ -42,13 +41,11 @@ export const createTrack = (trackDef: TrackDefinition): Segment[] => {
           sprites: [],
        };
        
-       // Smooth curve entry/exit
        if (Math.abs(curveStrength) > 0) {
            if (i < 10) segment.curve = easeIn(0, curveStrength, i/10);
            else if (i > section.length - 10) segment.curve = easeOut(curveStrength, 0, (i - (section.length - 10))/10);
        }
        
-       // Colors
        const isLight = Math.floor(segments.length / 3) % 2 !== 0;
        segment.color = {
          road: isLight ? COLORS.LIGHT.road : COLORS.DARK.road,
@@ -61,52 +58,48 @@ export const createTrack = (trackDef: TrackDefinition): Segment[] => {
     }
   });
 
-  // 2. Map Generation (2D Coordinates) with Loop Closure
+  // 2. Loop Closure & Map Generation (2D Coordinates)
+  let rawMapX = 0;
+  let rawMapY = 0;
+  let rawAngle = 0;
+  const anglePerCurveUnit = 0.015; 
+  const mapScale = 0.5;
+
+  segments.forEach(seg => {
+      const angleStep = seg.curve * anglePerCurveUnit;
+      rawAngle += angleStep;
+      rawMapX += Math.sin(rawAngle) * mapScale;
+      rawMapY -= Math.cos(rawAngle) * mapScale;
+  });
+
+  const xCorrectionPerSegment = -rawMapX / segments.length;
+  const yCorrectionPerSegment = -rawMapY / segments.length;
+
   let mapX = 0;
   let mapY = 0;
-  let mapAngle = 0; // 0 is North
-  const anglePerCurveUnit = 0.015; // Scale for rotation
+  let mapAngle = 0;
 
-  // First Pass: Calculate raw coordinates
-  segments.forEach(seg => {
+  segments.forEach((seg, i) => {
       seg.mapX = mapX;
       seg.mapY = mapY;
       
       const angleStep = seg.curve * anglePerCurveUnit;
       mapAngle += angleStep;
       
-      // Move 'forward' relative to map coordinates. 
-      const mapScale = 0.5; 
       mapX += Math.sin(mapAngle) * mapScale;
       mapY -= Math.cos(mapAngle) * mapScale;
+
+      mapX += xCorrectionPerSegment;
+      mapY += yCorrectionPerSegment;
   });
 
-  // Loop Closure Logic:
-  // Calculate the gap between the last point and the start (0,0)
-  // And distribute that error across all segments to force a closed loop.
-  const endX = mapX;
-  const endY = mapY;
-  // We want endX/endY to be 0,0 (same as start).
-  // The error is exactly endX, endY.
-  
-  segments.forEach((seg, i) => {
-      const percent = i / segments.length;
-      // Subtract the proportional error
-      seg.mapX -= (endX * percent);
-      seg.mapY -= (endY * percent);
-  });
-
-  // 3. Decoration & Obstacles
-  // Add Start/Finish Line
+  // 4. Decoration
   segments[0].color = COLORS.START;
   segments[1].color = COLORS.START;
   for(let i = 0; i < 3; i++) segments[segments.length - 1 - i].color = COLORS.FINISH;
 
-  // Add Random Obstacles
   segments.forEach((seg, i) => {
-      // Don't put obstacles at start or end
       if (i > 50 && i < segments.length - 50) {
-          // Probability
           if (i % 20 === 0 && Math.random() > 0.4) {
               const type = Math.random() > 0.5 ? 'BOULDER' : 'TREE';
               const spriteData = OBSTACLES.find(o => o.type === type);
@@ -127,35 +120,21 @@ export const createTrack = (trackDef: TrackDefinition): Segment[] => {
 };
 
 export const createCars = (playerColor: string, playerName: string, difficulty: Difficulty, referenceAvgSpeedKmh: number = 0): Car[] => {
-  
-  // Calculate AI Max Speed based on Difficulty and Records
-  let aiMaxSpeed = 22000; // Default fallback
-  const referenceSpeedUnits = referenceAvgSpeedKmh * 100; // Convert km/h back to engine units
+  let aiMaxSpeed = 22000; 
+  const referenceSpeedUnits = referenceAvgSpeedKmh * 100; 
 
   switch (difficulty) {
     case Difficulty.ROOKIE:
-      // Fixed slow speed (~160 km/h)
       aiMaxSpeed = 16000; 
       break;
-    
     case Difficulty.AMATEUR:
-      // 90% of best record, or default 200 km/h if no record
-      if (referenceSpeedUnits > 0) {
-        aiMaxSpeed = referenceSpeedUnits * 0.90;
-      } else {
-        aiMaxSpeed = 20000;
-      }
+      if (referenceSpeedUnits > 0) aiMaxSpeed = referenceSpeedUnits * 0.90;
+      else aiMaxSpeed = 20000;
       break;
-
     case Difficulty.PRO:
-      // 105% of best record (Hard!), or default 235 km/h
-      if (referenceSpeedUnits > 0) {
-        aiMaxSpeed = referenceSpeedUnits * 1.05;
-      } else {
-        aiMaxSpeed = 23500;
-      }
-      // Cap at logical engine max to prevent physics breaking
-      aiMaxSpeed = Math.min(aiMaxSpeed, 25000); 
+      if (referenceSpeedUnits > 0) aiMaxSpeed = referenceSpeedUnits * 1.05;
+      else aiMaxSpeed = 23500;
+      aiMaxSpeed = Math.min(aiMaxSpeed, PHYSICS.MAX_SPEED + 1000); 
       break;
   }
 
@@ -164,8 +143,8 @@ export const createCars = (playerColor: string, playerName: string, difficulty: 
       offset: 0,
       z: 0,
       speed: 0,
-      maxSpeed: 24000, // Player max ~240km/h
-      accel: 100,
+      maxSpeed: PHYSICS.MAX_SPEED, 
+      accel: PHYSICS.ACCEL,
       name: playerName,
       color: playerColor,
       isPlayer: true,
@@ -177,10 +156,10 @@ export const createCars = (playerColor: string, playerName: string, difficulty: 
     },
     {
       offset: -0.5,
-      z: 2000, // Start slightly ahead
-      speed: aiMaxSpeed * 0.8, // Start with some speed
+      z: 2000, 
+      speed: aiMaxSpeed * 0.8,
       maxSpeed: aiMaxSpeed,
-      accel: 80,
+      accel: PHYSICS.ACCEL * 0.9,
       name: `CPU [${difficulty === Difficulty.PRO ? 'PRO' : difficulty === Difficulty.AMATEUR ? 'AVG' : 'NOOB'}]`,
       color: '#FF0000',
       isPlayer: false,
@@ -197,35 +176,54 @@ export const updateGame = (cars: Car[], track: Segment[], input: { left: boolean
   const player = cars[0];
   const trackLength = track.length * SEGMENT_LENGTH;
 
-  // --- PLAYER PHYSICS ---
+  // --- PHYSICS ENGINE REFACTOR (Geometric Tangent Only) ---
   const playerSegment = track[Math.floor(player.z / SEGMENT_LENGTH) % track.length];
   
-  // Acceleration
-  if (input.up) player.speed += player.accel;
-  else if (input.down) player.speed -= player.accel * 3;
-  else player.speed -= player.accel / 2; // Friction
+  // 1. Longitudinal (Accel/Brake)
+  if (input.up) {
+      player.speed += player.accel;
+  } else if (input.down) {
+      player.speed -= PHYSICS.BRAKING; 
+  } else {
+      player.speed -= PHYSICS.DECEL_COAST; 
+  }
 
-  // Clamp speed
+  // Offroad friction
+  if ((player.offset < -1 || player.offset > 1)) {
+     if (player.speed > 2000) { 
+        player.speed -= PHYSICS.DECEL_OFFROAD;
+     }
+  }
   player.speed = Math.max(0, Math.min(player.speed, player.maxSpeed));
+  
+  // Normalized Speed (0.0 to 1.0) is KEY for consistent physics at all speeds
+  const speedRatio = player.speed / player.maxSpeed; 
 
-  // Steering & Centrifugal Force
-  const speedRatio = (player.speed / player.maxSpeed);
-  // Increase steering sensitivity (was 2)
-  const dx = dt * 2.8 * speedRatio; 
-  
-  if (input.left) player.offset -= dx;
-  if (input.right) player.offset += dx;
-  
-  // Centrifugal force in curves (pulls car outwards)
-  // Drastically reduced effect to prevent "drift to left" feeling (was 1.15)
-  if (playerSegment.curve !== 0 && player.speed > 0) {
-      player.offset -= (dx * playerSegment.curve * speedRatio * 0.15);
+  // 2. Lateral (Tangent Drift)
+  // Logic: If track curves Right (Positive curve), track moves Right relative to straight car.
+  // Visual result: Car moves Left relative to track center.
+  // Formula: offset -= curve * speedRatio * factor.
+  // Higher speed = Faster geometric drift (you cover more curved ground per second).
+  const curve = playerSegment.curve;
+  if (player.speed > 0 && curve !== 0) {
+      const tangentDrift = curve * speedRatio * dt * PHYSICS.DRIFT_FACTOR;
+      player.offset -= tangentDrift;
   }
 
-  // Off-road deceleration
-  if ((player.offset < -1 || player.offset > 1) && player.speed > 8000) {
-      player.speed -= player.accel * 2; // Slow down faster on grass
+  // 3. Steering Input
+  // Must be stronger than drift to allow cornering.
+  // Input also scaled by speedRatio (standard for racing games: harder to turn wheel when stopped, more effective when moving)
+  // We clamp speedRatio to a minimum (0.1) so you can still steer at crawl speeds.
+  const steeringInput = input.left ? -1 : input.right ? 1 : 0;
+  if (steeringInput !== 0) {
+      const effectiveRatio = Math.max(0.2, speedRatio); 
+      const steer = steeringInput * PHYSICS.STEERING_SPEED * effectiveRatio * dt;
+      player.offset += steer;
   }
+
+  // Bounds clamping
+  if (player.offset < -3) player.offset = -3;
+  if (player.offset > 3) player.offset = 3;
   
   // Move Player Z
   player.z += player.speed * dt;
@@ -239,51 +237,47 @@ export const updateGame = (cars: Car[], track: Segment[], input: { left: boolean
       }
   }
 
-  // --- RIVAL AI ---
+  // --- RIVAL AI (Adjusted for stronger drift) ---
   const rival = cars[1];
   if (rival && !rival.finished) {
-      const rivalSeg = track[Math.floor(rival.z / SEGMENT_LENGTH) % track.length];
-      
-      // AI Physics
+      // Rival accel
       rival.speed = Math.min(rival.speed + rival.accel, rival.maxSpeed);
-      
-      // Look ahead for curves
+
+      // Lookahead
       const lookAheadIdx = (Math.floor(rival.z / SEGMENT_LENGTH) + 20) % track.length;
       const futureCurve = track[lookAheadIdx].curve;
       
-      // Intelligent cornering
-      let targetOffset = 0;
-      let braking = false;
-
-      // Prepare for curve
-      if (Math.abs(futureCurve) > 2) {
-         // Sharp curve ahead, slow down slightly
-         braking = true;
-         // Hug the inside
-         targetOffset = futureCurve > 0 ? 0.7 : -0.7; 
-      } else if (Math.abs(futureCurve) > 0) {
-         // Mild curve, just steer
-         targetOffset = futureCurve > 0 ? 0.4 : -0.4;
+      // Brake for corners
+      if (Math.abs(futureCurve) > 3 && rival.speed > rival.maxSpeed * 0.8) {
+          rival.speed -= rival.accel * 2; 
       }
 
-      // Brake if needed
-      if (braking && rival.speed > rival.maxSpeed * 0.7) {
-          rival.speed -= rival.accel * 1.5;
-      }
-      
-      // Steer towards target (Apex)
-      if (rival.offset < targetOffset) rival.offset += dx * 0.9; // Slightly less agile than player
-      if (rival.offset > targetOffset) rival.offset -= dx * 0.9;
-      
-      // Apply curve force to AI too (balanced with player physics)
+      // Rival Lateral Logic
+      const rivalSpeedRatio = rival.speed / rival.maxSpeed;
+      const rivalSeg = track[Math.floor(rival.z / SEGMENT_LENGTH) % track.length];
+
+      // 1. Apply same geometric drift as player
       if (rivalSeg.curve !== 0) {
-           rival.offset -= (dx * rivalSeg.curve * speedRatio * 0.15);
+          rival.offset -= rivalSeg.curve * rivalSpeedRatio * dt * PHYSICS.DRIFT_FACTOR;
       }
-      
-      // Basic collision avoidance (keep in bounds)
-      if (rival.offset < -0.9) rival.offset += dx;
-      if (rival.offset > 0.9) rival.offset -= dx;
 
+      // 2. AI Steering (Counteract drift + Aim for lane center)
+      let targetOffset = 0;
+      if (Math.abs(futureCurve) > 1) {
+         // Inside line
+         targetOffset = futureCurve > 0 ? 0.5 : -0.5; 
+      }
+
+      // AI Steering power needs to be enough to beat the drift
+      const aiSteerPower = PHYSICS.STEERING_SPEED * Math.max(0.2, rivalSpeedRatio) * dt;
+
+      if (rival.offset < targetOffset) rival.offset += aiSteerPower;
+      if (rival.offset > targetOffset) rival.offset -= aiSteerPower;
+      
+      // Bounds
+      if (rival.offset < -0.9) rival.offset += aiSteerPower * 1.5;
+      if (rival.offset > 0.9) rival.offset -= aiSteerPower * 1.5;
+      
       rival.z += rival.speed * dt;
       if (rival.z >= trackLength) {
           rival.z -= trackLength;
