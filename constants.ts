@@ -22,8 +22,21 @@ export const COLORS = {
 
 export const OBSTACLES = [
   { type: 'BOULDER', width: 500, height: 400 },
-  { type: 'TREE', width: 700, height: 1000 }
+  { type: 'TREE', width: 700, height: 1000 },
+  { type: 'BARREL', width: 450, height: 350 }, // Widen fuel barrel
+  { type: 'TIRE', width: 450, height: 250 }     // Widen Old tire
 ];
+
+export const DAMAGE = {
+    MAX: 100,
+    HIT_TREE: 20,
+    HIT_BOULDER: 25,
+    HIT_BARREL: 15,
+    HIT_TIRE: 10,
+    HIT_CAR_REAR: 5,
+    HIT_CAR_SIDE: 3,
+    HIT_CAR_STOPPED: 25 // Hitting a stationary car is like hitting a wall
+};
 
 // --- PHYSICS CONFIGURATION ---
 export const PHYSICS = {
@@ -31,7 +44,7 @@ export const PHYSICS = {
   ACCEL: 100,           // Acceleration rate
   BRAKING: 250,         // Braking power 
   DECEL_COAST: 15,      // Natural friction when letting go of gas (Coast)
-  DECEL_OFFROAD: 150,   // High friction when off-road (slows down fast)
+  DECEL_OFFROAD: 800,   // High friction when off-road (slows down fast)
   
   // Speed Thresholds
   SPEED_GRIP_LOSS: 12000, 
@@ -43,14 +56,18 @@ export const PHYSICS = {
   // Road is 2.0 units wide (-1 to 1). 
   // You will cross the half-width (1.0) in ~30 frames (0.5 seconds).
   // This effectively breaks the "rail effect" without being instant teleportation.
-  DRIFT_FACTOR: 1.55, 
+  DRIFT_FACTOR: 0.90, 
 
   // 2. CENTRIFUGAL FORCE 
-  // Kept at 0 for now to focus purely on geometry as requested.
-  CENTRIFUGAL_FORCE: 0.0, 
+  // Grows exponentially with speed. Adds weight/inertia.
+  CENTRIFUGAL_FORCE: 0.35, 
 
   // 3. STEERING SENSITIVITY
   // Must be high enough to counter the Drift Factor.
   // 3.5 allows crossing the full road in ~0.6 seconds at max speed.
-  STEERING_SPEED: 3.5, 
+  STEERING_SPEED: 6.0, 
+
+  // 4. SPEED DAMPING
+  // Reduces steering effectiveness at max speed (Understeer)
+  SPEED_STEERING_DAMPING: 0.4
 };

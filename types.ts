@@ -93,4 +93,6 @@ export interface Car {
   lapTime: number;
   finished: boolean;
   width: number; // Width of the car in world units (0-1 range relative to road)
+  damage: number; // 0 to 100
+  exploded: boolean; // True if damage >= 100
 }

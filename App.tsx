@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Play, Pause, RotateCcw, Trophy, CarFront, Flag, Signal, Gauge, Zap, ChevronDown, ChevronUp, Map, Dna, Frown } from 'lucide-react';
 import GameCanvas from './components/GameCanvas';
@@ -346,11 +347,11 @@ const App: React.FC = () => {
             <div className={`absolute top-0 left-0 w-full h-2 bg-gradient-to-r ${finalRank === 1 ? 'from-green-400 via-yellow-500 to-green-400' : 'from-red-900 via-red-600 to-red-900'}`}></div>
 
             <h2 className={`text-6xl font-black text-center mb-2 italic tracking-tighter drop-shadow-lg ${finalRank === 1 ? 'text-yellow-400' : 'text-red-500'}`}>
-              {finalRank === 1 ? 'VICTORY' : 'DEFEAT'}
+              {finalRank === 1 ? 'VICTORY' : winnerName === 'CRASHED' ? 'DESTROYED' : 'DEFEAT'}
             </h2>
 
             <p className="text-center text-gray-400 mb-6 font-bold tracking-widest uppercase text-sm">
-                {finalRank === 1 ? 'CHAMPION OF THE TRACK' : `WINNER: ${winnerName}`}
+                {finalRank === 1 ? 'CHAMPION OF THE TRACK' : winnerName === 'CRASHED' ? 'VEHICLE DESTROYED' : `WINNER: ${winnerName}`}
             </p>
             
             <div className="flex justify-center mb-8">
@@ -382,7 +383,9 @@ const App: React.FC = () => {
             ) : (
                 <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-8 text-center flex items-center justify-center gap-2">
                     <Frown size={16} className="text-red-400"/>
-                    <p className="text-red-200 text-xs font-bold tracking-wider">RECORD NOT SAVED (DID NOT WIN)</p>
+                    <p className="text-red-200 text-xs font-bold tracking-wider">
+                        {winnerName === 'CRASHED' ? 'TOO MUCH DAMAGE!' : 'RECORD NOT SAVED (DID NOT WIN)'}
+                    </p>
                 </div>
             )}
 
