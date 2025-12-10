@@ -3,7 +3,6 @@
 > Un tributo a los arcades de carreras de los 80 (OutRun, Lotus Turbo Challenge) construido con tecnologías web modernas.
 
 ![Banner del Juego](screenshots/banner.png)
-*(Nota: Reemplaza esta imagen con una captura panorámica de una carrera)*
 
 **Retro Racer 2.5D** es un juego de carreras de estilo pseudo-3D construido con **React 19**, **TypeScript** y **HTML5 Canvas**. Cuenta con un motor de física personalizado, generación procedural de pistas, audio sintetizado en tiempo real y una estética Synthwave inmersiva.
 
@@ -130,8 +129,6 @@ El motor de audio utiliza osciladores (`OscillatorNode`) y ganancia (`GainNode`)
 
 ## 📸 Galería
 
-*(Sección reservada para capturas de pantalla)*
-
 | Menú Principal | Carrera (Día) | Mapa 2D |
 | :---: | :---: | :---: |
 | ![Menu](screenshots/menu.png) | ![Race](screenshots/race.png) | ![Map](screenshots/map.png) |
@@ -146,10 +143,35 @@ El motor de audio utiliza osciladores (`OscillatorNode`) y ganancia (`GainNode`)
 
 ---
 
-## 📄 Licencia
+## ✒️ Autores 
 
-Este proyecto está bajo la licencia MIT. Eres libre de usarlo, modificarlo y distribuirlo.
+_Todos aquellos que ayudaron a levantar el proyecto desde sus inicios:_
+
+* **Paco Maciá** - _Trabajo Inicial_ - [pmacia](https://github.com/pmacia)
+// * **Fulanito Detal** - _Documentación_ - [fulanitodetal](#fulanito-de-tal)
+
+// También puedes mirar la lista de todos los [contribuyentes](https://github.com/your/project/contributors) quiénes han participado en este proyecto.
 
 ---
 
-*Creado con ❤️ y TypeScript.*
+## 📜 Licencia
+
+Este proyecto está bajo la licencia  
+[*Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)**.
+
+### ✅ Puedes:
+- Usar el código y los recursos.
+- Modificarlo y crear derivados.
+- Compartirlo con otros.
+
+### ❌ No puedes:
+- Usarlo con fines comerciales.
+
+### 🔗 Debes:
+- Dar crédito al autor original: **Francisco Maciá Pérez**.
+- Incluir un enlace a este repositorio cuando lo compartas.
+
+---
+
+## 🏷 Badge de Licencia
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204

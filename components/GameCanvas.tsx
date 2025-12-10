@@ -21,13 +21,14 @@ interface Particle {
   life: number;
   size: number;
   color: string;
-  type: 'SMOKE' | 'FIRE' | 'DEBRIS' | 'SPARK' | 'LEAF';
+  type: 'SMOKE' | 'FIRE' | 'DEBRIS' | 'SPARK' | 'LEAF' | 'FIREWORK';
 }
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isPaused, bestSpeed }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
+  const noiseBufferRef = useRef<AudioBuffer | null>(null);
   
   // Engine Sound Refs
   const engineOscRef = useRef<OscillatorNode | null>(null);
@@ -42,6 +43,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
   const frameIdRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
   
+  // Finishing Sequence State
+  const finishingSeqRef = useRef<{
+      active: boolean;
+      startTime: number;
+      resultProcessed: boolean;
+  }>({ active: false, startTime: 0, resultProcessed: false });
+
   const particlesRef = useRef<Particle[]>([]);
   
   // HUD Refs
@@ -67,6 +75,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             master.gain.value = isMuted ? 0 : 0.5; // Default volume 50%
             master.connect(audioCtxRef.current.destination);
             masterGainRef.current = master;
+
+            // Generate White Noise Buffer (for explosions)
+            const bufferSize = audioCtxRef.current.sampleRate * 2; // 2 seconds of noise
+            const buffer = audioCtxRef.current.createBuffer(1, bufferSize, audioCtxRef.current.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+            noiseBufferRef.current = buffer;
 
             audioCtxRef.current.resume();
         }
@@ -164,7 +181,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       }
   };
 
-  const playSynthSound = (type: 'CRASH' | 'BUMP' | 'EXPLOSION' | 'TIRE' | 'BARREL' | 'REV' | 'GO') => {
+  const playSynthSound = (type: 'CRASH' | 'BUMP' | 'EXPLOSION' | 'TIRE' | 'BARREL' | 'REV' | 'GO' | 'VICTORY' | 'DEFEAT') => {
       const ctx = audioCtxRef.current;
       if (!ctx || ctx.state !== 'running' || !masterGainRef.current) return;
 
@@ -172,11 +189,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       
+      // Default routing
       osc.connect(gain);
       gain.connect(masterGainRef.current);
 
       if (type === 'CRASH') {
-          // Noise-like saw for crash
           osc.type = 'sawtooth';
           osc.frequency.setValueAtTime(100, t);
           osc.frequency.exponentialRampToValueAtTime(20, t + 0.3);
@@ -193,80 +210,151 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
           osc.start(t);
           osc.stop(t + 0.1);
       } else if (type === 'EXPLOSION') {
+          // Use Noise Buffer if available for realistic explosion
+          if (noiseBufferRef.current) {
+              const noiseSrc = ctx.createBufferSource();
+              noiseSrc.buffer = noiseBufferRef.current;
+              
+              const noiseFilter = ctx.createBiquadFilter();
+              noiseFilter.type = 'lowpass';
+              noiseFilter.frequency.setValueAtTime(1000, t);
+              noiseFilter.frequency.linearRampToValueAtTime(100, t + 1.5);
+
+              const noiseGain = ctx.createGain();
+              noiseGain.gain.setValueAtTime(1.5, t); // Loud
+              noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 1.5);
+
+              noiseSrc.connect(noiseFilter);
+              noiseFilter.connect(noiseGain);
+              noiseGain.connect(masterGainRef.current);
+              
+              noiseSrc.start(t);
+              // Clean up handled by GC generally, but good to know
+          }
+          
+          // Add Sub-bass thump via Oscillator
           osc.type = 'sawtooth';
           osc.frequency.setValueAtTime(50, t);
           osc.frequency.exponentialRampToValueAtTime(10, t + 1.0);
-          gain.gain.setValueAtTime(0.8, t);
+          gain.gain.setValueAtTime(1.0, t);
           gain.gain.exponentialRampToValueAtTime(0.01, t + 1.0);
           osc.start(t);
           osc.stop(t + 1.0);
+
       } else if (type === 'TIRE') {
-          // Heavy, dry thud
           osc.type = 'sawtooth'; 
           const filter = ctx.createBiquadFilter();
           filter.type = 'lowpass';
           filter.frequency.setValueAtTime(120, t); 
-          
           osc.disconnect();
           osc.connect(filter);
           filter.connect(gain);
-
           osc.frequency.setValueAtTime(80, t);
           osc.frequency.linearRampToValueAtTime(20, t + 0.2);
-          
           gain.gain.setValueAtTime(0.6, t);
           gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
           osc.start(t);
           osc.stop(t + 0.25);
-
       } else if (type === 'BARREL') {
-          // Metallic, hollow
           osc.type = 'square'; 
           const filter = ctx.createBiquadFilter();
           filter.type = 'lowpass';
           filter.frequency.setValueAtTime(300, t);
           filter.Q.value = 15; 
-          
           osc.disconnect();
           osc.connect(filter);
           filter.connect(gain);
-
           osc.frequency.setValueAtTime(150, t);
           osc.frequency.exponentialRampToValueAtTime(40, t + 0.4);
           gain.gain.setValueAtTime(0.5, t);
           gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
           osc.start(t);
           osc.stop(t + 0.4);
-
       } else if (type === 'REV') {
-          // Engine Rev for Countdown (Pitch up)
           osc.type = 'sawtooth';
           osc.frequency.setValueAtTime(100, t);
           osc.frequency.linearRampToValueAtTime(300, t + 0.3);
-          
           const filter = ctx.createBiquadFilter();
           filter.type = 'lowpass';
           filter.frequency.value = 400;
-
           osc.disconnect();
           osc.connect(filter);
           filter.connect(gain);
-
           gain.gain.setValueAtTime(0.3, t);
           gain.gain.linearRampToValueAtTime(0.01, t + 0.4);
           osc.start(t);
           osc.stop(t + 0.4);
-      
       } else if (type === 'GO') {
-          // High pitched "GO" signal
           osc.type = 'square';
           osc.frequency.setValueAtTime(600, t);
           osc.frequency.linearRampToValueAtTime(800, t + 0.6);
-          
           gain.gain.setValueAtTime(0.4, t);
           gain.gain.exponentialRampToValueAtTime(0.01, t + 0.8);
           osc.start(t);
           osc.stop(t + 0.8);
+      } else if (type === 'VICTORY') {
+          // Major Arpeggio (C - E - G - C)
+          const freqs = [523.25, 659.25, 783.99, 1046.50];
+          freqs.forEach((f, i) => {
+              const o = ctx.createOscillator();
+              const g = ctx.createGain();
+              o.type = 'triangle';
+              o.frequency.value = f;
+              o.connect(g);
+              g.connect(masterGainRef.current!);
+              
+              const start = t + (i * 0.15);
+              g.gain.setValueAtTime(0, start);
+              g.gain.linearRampToValueAtTime(0.3, start + 0.05);
+              g.gain.exponentialRampToValueAtTime(0.01, start + 0.4);
+              
+              o.start(start);
+              o.stop(start + 0.5);
+          });
+      } else if (type === 'DEFEAT') {
+          // Classic Sad Trombone (Descending semitones: C#3 -> C3 -> B2 -> Bb2)
+          // Frequencies approx: 138.59, 130.81, 123.47, 116.54
+          const notes = [138.59, 130.81, 123.47, 110.00]; // Last one drops lower
+          
+          notes.forEach((freq, i) => {
+             const o = ctx.createOscillator();
+             const g = ctx.createGain();
+             o.type = 'sawtooth';
+             
+             // Lowpass to make it sound brassy
+             const f = ctx.createBiquadFilter();
+             f.type = 'lowpass';
+             f.frequency.value = 300;
+
+             o.connect(f);
+             f.connect(g);
+             g.connect(masterGainRef.current!);
+             
+             const start = t + (i * 0.4);
+             const duration = i === 3 ? 1.5 : 0.35; // Last note is long
+
+             o.frequency.setValueAtTime(freq, start);
+             if (i === 3) {
+                 // Slide down the last note
+                 o.frequency.linearRampToValueAtTime(freq - 20, start + duration);
+                 // Tremolo for the last note
+                 const lfo = ctx.createOscillator();
+                 const lfoGain = ctx.createGain();
+                 lfo.frequency.value = 5;
+                 lfoGain.gain.value = 10;
+                 lfo.connect(lfoGain);
+                 lfoGain.connect(o.frequency);
+                 lfo.start(start);
+                 lfo.stop(start + duration);
+             }
+
+             g.gain.setValueAtTime(0, start);
+             g.gain.linearRampToValueAtTime(0.4, start + 0.05);
+             g.gain.linearRampToValueAtTime(0, start + duration);
+
+             o.start(start);
+             o.stop(start + duration);
+          });
       }
   };
 
@@ -285,13 +373,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       particlesRef.current = [];
       setCountdown(3);
       isRacingRef.current = false;
+      finishingSeqRef.current = { active: false, startTime: 0, resultProcessed: false };
       stopEngine(); // Reset engine
       
       // Initialize Audio on start (requires interaction, assumed from menu click)
       initAudio();
       
       let count = 3;
-      // Play initial rev sound for '3' immediately
       playSynthSound('REV');
 
       const interval = setInterval(() => {
@@ -314,12 +402,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       trackRef.current = [];
       particlesRef.current = [];
       isRacingRef.current = false;
+      finishingSeqRef.current = { active: false, startTime: 0, resultProcessed: false };
       stopEngine(); // STOP ENGINE SOUND
     }
   }, [status, settings, bestSpeed]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent, isDown: boolean) => {
+      // Disable input during finishing sequence
+      if (finishingSeqRef.current.active) return;
+
       if (['ArrowLeft', 'a', 'A'].includes(e.key)) inputRef.current.left = isDown;
       if (['ArrowRight', 'd', 'D'].includes(e.key)) inputRef.current.right = isDown;
       if (['ArrowUp', 'w', 'W'].includes(e.key)) inputRef.current.up = isDown;
@@ -335,6 +427,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
   }, []);
 
   const handleTouchInput = (action: 'up' | 'down' | 'left' | 'right', isPressed: boolean) => {
+      if (finishingSeqRef.current.active) return;
       inputRef.current[action] = isPressed;
       initAudio();
   };
@@ -425,6 +518,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         ctx.restore();
     };
 
+    const spawnFireworks = () => {
+        const x = Math.random() * WIDTH;
+        const y = Math.random() * (HEIGHT / 2);
+        const color = `rgba(${Math.floor(Math.random()*255)},${Math.floor(Math.random()*255)},${Math.floor(Math.random()*255)},`;
+        
+        for(let i=0; i<30; i++) {
+            particlesRef.current.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 10,
+                vy: (Math.random() - 0.5) * 10,
+                life: 1.5,
+                size: Math.random() * 4 + 2,
+                color: color,
+                type: 'FIREWORK'
+            });
+        }
+        playSynthSound('BUMP'); // Small pop sound
+    };
+
     const spawnDamageParticles = (x: number, y: number, damage: number, scale: number) => {
         if (damage < 20) return;
         let chance = 0.1;
@@ -497,6 +609,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             } else if (p.type === 'SPARK') {
                 p.vy += 0.2;
                 p.life -= 0.05;
+            } else if (p.type === 'FIREWORK') {
+                p.vy += 0.1;
+                p.life -= 0.02;
             } else {
                 p.life -= 0.02; // Smoke/Fire
                 p.size *= 1.02;
@@ -521,6 +636,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             
             if (p.type === 'FIRE') {
                 ctx.fillStyle = `${p.color}${p.life})`;
+            } else if (p.type === 'FIREWORK') {
+                ctx.fillStyle = `${p.color}${p.life})`;
             } else {
                 ctx.fillStyle = `${p.color}${p.life * 0.8})`; 
             }
@@ -535,7 +652,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
           return;
       }
       // Re-enable engine if resuming from pause
-      if (isRacingRef.current && !engineOscRef.current && !carsRef.current[0]?.finished && !carsRef.current[0]?.exploded) {
+      if (isRacingRef.current && !engineOscRef.current && !finishingSeqRef.current.active && !carsRef.current[0]?.exploded) {
           startEngine();
       }
 
@@ -543,7 +660,76 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       const dt = Math.min(1, (now - lastTimeRef.current) / 1000);
       lastTimeRef.current = now;
 
+      const player = carsRef.current[0];
+      const rival = carsRef.current[1];
+      
+      // CHECK FOR FINISH CONDITIONS
+      const anyCarFinished = carsRef.current.some(c => c.finished);
+      const playerDead = player.exploded;
+      const finishConditionMet = anyCarFinished || playerDead;
+
+      // START FINISHING SEQUENCE (If not already active)
+      if (finishConditionMet && !finishingSeqRef.current.active) {
+          finishingSeqRef.current.active = true;
+          finishingSeqRef.current.startTime = Date.now();
+          stopEngine(); // Cut engine noise immediately
+
+          if (playerDead) {
+             playSynthSound('EXPLOSION');
+             setTimeout(() => playSynthSound('DEFEAT'), 1000); // Play defeat melody after initial explosion
+          } else if (player.finished) {
+             const rank = player.finished && (!rival.finished || (rival.lapTime > player.lapTime)) ? 1 : 2;
+             if (rank === 1) playSynthSound('VICTORY');
+             else playSynthSound('DEFEAT');
+          } else {
+              // Rival finished first
+              playSynthSound('DEFEAT');
+          }
+          
+          // Clear inputs so car stops naturally
+          inputRef.current = { up: false, down: false, left: false, right: false };
+      }
+
+      // PROCESS FINISHING SEQUENCE
+      if (finishingSeqRef.current.active) {
+          const timeSinceFinish = Date.now() - finishingSeqRef.current.startTime;
+
+          // Visual Effects
+          if (player.finished && !playerDead) {
+              if (Math.random() < 0.05) spawnFireworks();
+          }
+
+          // Transition to Game Over Screen
+          if (timeSinceFinish > 3500 && !finishingSeqRef.current.resultProcessed) {
+              finishingSeqRef.current.resultProcessed = true;
+              const totalTime = (Date.now() - startTimeRef.current) / 1000;
+              const totalDistance = trackRef.current.length * SEGMENT_LENGTH * settings.laps;
+              
+              let rank = 2;
+              let winnerName = 'CPU';
+              
+              if (playerDead) {
+                  rank = 2;
+                  winnerName = 'CRASHED';
+              } else if (player.finished) {
+                  // Determine winner based on who finished first logic
+                  if (rival.finished && rival.lapTime < player.lapTime) {
+                      rank = 2;
+                      winnerName = rival.name;
+                  } else {
+                      rank = 1;
+                      winnerName = player.name;
+                  }
+              }
+
+              onFinish(totalTime, totalDistance, rank, winnerName);
+              return; // Stop rendering
+          }
+      }
+
       if (isRacingRef.current) {
+        // Continue updating game physics even during finishing sequence (for slowing down, smoke, etc)
+        // If exploded, updateGame already halts speed
         updateGame(
             carsRef.current, 
             trackRef.current, 
@@ -574,10 +760,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             }
         );
         
-        const player = carsRef.current[0];
-        
-        // Update Engine Sound
-        if (engineOscRef.current) {
+        // Update Engine Sound (Only if not finishing)
+        if (engineOscRef.current && !finishingSeqRef.current.active) {
             updateEngine(player.speed / player.maxSpeed);
         }
 
@@ -595,30 +779,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             else if (pct > 50) damageRef.current.style.backgroundColor = '#f97316';
             else damageRef.current.style.backgroundColor = '#22c55e';
         }
-
-        if (player.exploded) {
-            stopEngine(); // Engine dies
-            playSynthSound('EXPLOSION');
-            const totalTime = (Date.now() - startTimeRef.current) / 1000;
-            const totalDistance = trackRef.current.length * SEGMENT_LENGTH * settings.laps;
-            onFinish(totalTime, totalDistance, 2, 'CRASHED');
-            return;
-        }
       }
       
-      const player = carsRef.current[0];
-      const trackLen = trackRef.current.length;
-      const winner = carsRef.current.find(c => c.finished);
-
-      if (winner) {
-          stopEngine(); // Race over
-          const totalTime = (Date.now() - startTimeRef.current) / 1000;
-          const totalDistance = trackRef.current.length * SEGMENT_LENGTH * settings.laps;
-          const rank = winner.isPlayer ? 1 : 2;
-          onFinish(totalTime, totalDistance, rank, winner.name);
-          return;
-      }
-
       // --- Rendering ---
       ctx.fillStyle = COLORS.SKY;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -675,9 +837,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
           });
 
           carsRef.current.forEach(car => {
-              const segIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackLen;
+              const segIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackRef.current.length;
               const seg = trackRef.current[segIdx];
-              const nextSeg = trackRef.current[(segIdx + 5) % trackLen];
+              const nextSeg = trackRef.current[(segIdx + 5) % trackRef.current.length];
               const angle = Math.atan2(nextSeg.mapY - seg.mapY, nextSeg.mapX - seg.mapX);
               
               ctx.save();
@@ -698,6 +860,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
           ctx.restore();
 
       } else {
+        const trackLen = trackRef.current.length;
         const cameraX = player.offset * ROAD_WIDTH;
         const cameraY = 1500;
         const cameraZ = player.z;
@@ -848,11 +1011,37 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         const playerScreenY = HEIGHT - 80;
         const playerW = 340;
         const playerH = 140;
-        const bounce = (2 * Math.random() * (player.speed / player.maxSpeed) * HEIGHT / 480) * (Math.random() > 0.5 ? 1 : -1);
-        const pY = playerScreenY + (isRacingRef.current ? bounce : 0);
+        
+        // Vibration effect if exploded
+        let pY = playerScreenY;
+        if (player.exploded) {
+             pY += (Math.random() - 0.5) * 5; // Shake
+        } else {
+             const bounce = (2 * Math.random() * (player.speed / player.maxSpeed) * HEIGHT / 480) * (Math.random() > 0.5 ? 1 : -1);
+             pY += (isRacingRef.current ? bounce : 0);
+        }
 
-        if (!player.exploded) {
-            drawCar(ctx, WIDTH/2, pY, playerW, playerH, player.color);
+        // Draw Player (Even if exploded, draw charred version)
+        const carColor = player.exploded ? '#2d2d2d' : player.color;
+        drawCar(ctx, WIDTH/2, pY, playerW, playerH, carColor);
+
+        if (player.exploded) {
+            // Intense Fire & Smoke for exploded car
+            spawnDamageParticles(WIDTH/2, pY - 20, 100, 1.5);
+            if (Math.random() > 0.3) {
+                // Add more smoke manually to ensure visibility
+                 particlesRef.current.push({
+                    x: WIDTH/2 + (Math.random() * 40 - 20),
+                    y: pY - 30,
+                    vx: (Math.random() * 2 - 1),
+                    vy: -(Math.random() * 5 + 3),
+                    life: 1.5,
+                    size: Math.random() * 20 + 10,
+                    color: 'rgba(20,20,20,',
+                    type: 'SMOKE'
+                });
+            }
+        } else {
             spawnDamageParticles(WIDTH/2, pY - 20, player.damage, 1.0);
         }
 
@@ -921,10 +1110,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         ctx.arc(playerSeg.mapX, playerSeg.mapY, 2, 0, Math.PI*2);
         ctx.fill();
 
-        const rival = carsRef.current[1];
+        ctx.fillStyle = rival.color;
         const rivalSegIdx = Math.floor(rival.z / SEGMENT_LENGTH) % trackLen;
         const rivalSeg = trackRef.current[rivalSegIdx];
-        ctx.fillStyle = rival.color;
         ctx.beginPath();
         ctx.arc(rivalSeg.mapX, rivalSeg.mapY, 2, 0, Math.PI*2);
         ctx.fill();
