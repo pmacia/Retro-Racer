@@ -37,8 +37,8 @@ Sigue estos pasos para ejecutar el juego en tu entorno local.
 
 1.  **Clonar el repositorio**:
     ```bash
-    git clone https://github.com/tu-usuario/retro-racer-2.5d.git
-    cd retro-racer-2.5d
+    git clone https://github.com/tu-usuario/Retro-Racer.git
+    cd Retro-Racer
     ```
 
 2.  **Instalar dependencias**:
@@ -55,7 +55,7 @@ Sigue estos pasos para ejecutar el juego en tu entorno local.
     yarn start
     ```
 
-4.  Abre tu navegador en `http://localhost:3000`.
+4.  Abre tu navegador en `http://localhost:5173`.
 
 ---
 
@@ -157,7 +157,7 @@ _Todos aquellos que ayudaron a levantar el proyecto desde sus inicios:_
 ## 📜 Licencia
 
 Este proyecto está bajo la licencia  
-[*Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)**.
+**Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)**.
 
 ### ✅ Puedes:
 - Usar el código y los recursos.
@@ -171,7 +171,4 @@ Este proyecto está bajo la licencia
 - Dar crédito al autor original: **Francisco Maciá Pérez**.
 - Incluir un enlace a este repositorio cuando lo compartas.
 
----
 
-## 🏷 Badge de Licencia
-[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204

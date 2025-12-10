@@ -1,31 +1,72 @@
-
-import React, { useState } from 'react';
-import { Play, Pause, RotateCcw, Trophy, CarFront, Flag, Signal, Gauge, Zap, ChevronDown, ChevronUp, Map, Dna, Frown } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Play, Pause, RotateCcw, Trophy, Flag, ChevronDown, ChevronUp, Map, Save, Download, Trash2, X } from 'lucide-react';
 import GameCanvas from './components/GameCanvas';
-import { GameStatus, PlayerSettings, Score, Difficulty } from './types';
-import { saveScore, getScores } from './services/storageService';
-import { PRESET_TRACKS, generateRandomTrack } from './services/trackService';
+import { GameStatus, PlayerSettings, Score, Difficulty, TrackDefinition } from './types';
+import { saveScore, getScores, getCustomTracks, saveCustomTrack, deleteCustomTrack, getSettings, saveSettings } from './services/storageService';
+import { PRESET_TRACKS, generateRandomTrack, getAllTracks, getTrackById } from './services/trackService';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<GameStatus>(GameStatus.MENU);
-  const [settings, setSettings] = useState<PlayerSettings>({ 
-    name: 'JUGADOR 1', 
-    color: '#3b82f6', // Default Blue
-    laps: 3,
-    difficulty: Difficulty.AMATEUR,
-    trackId: 'gp_circuit'
+  
+  // Initialize settings from LocalStorage or Default
+  const [settings, setSettings] = useState<PlayerSettings>(() => {
+    const saved = getSettings();
+    return saved || { 
+      name: 'JUGADOR 1', 
+      color: '#3b82f6', // Default Blue
+      laps: 3,
+      difficulty: Difficulty.AMATEUR,
+      trackId: 'gp_circuit'
+    };
   });
+
   const [scores, setScores] = useState<Score[]>(getScores());
+  const [customTracks, setCustomTracks] = useState<TrackDefinition[]>(getCustomTracks());
+  
+  // Game State
+  const [activeTrack, setActiveTrack] = useState<TrackDefinition | null>(null);
+  
+  // Results
   const [finalTime, setFinalTime] = useState<number>(0);
   const [finalSpeed, setFinalSpeed] = useState<number>(0);
   const [finalRank, setFinalRank] = useState<number>(1);
   const [winnerName, setWinnerName] = useState<string>('');
+  
+  // UI State
   const [isLeaderboardExpanded, setIsLeaderboardExpanded] = useState<boolean>(false);
+  const [showSaveTrackModal, setShowSaveTrackModal] = useState<boolean>(false);
+  const [newTrackName, setNewTrackName] = useState('');
+  const [newTrackDesc, setNewTrackDesc] = useState('');
+
+  // Persist settings whenever they change
+  useEffect(() => {
+    saveSettings(settings);
+  }, [settings]);
 
   // Calculate best speed to pass to game engine for AI scaling
   const bestSpeed = scores.length > 0 ? scores[0].avgSpeed : 0;
 
-  const startGame = () => setStatus(GameStatus.PLAYING);
+  // Combine Presets + Custom
+  const allTracks = getAllTracks(customTracks);
+  const selectedTrackInfo = allTracks.find(t => t.id === settings.trackId) || (settings.trackId === 'random' ? { name: 'RANDOM', description: 'Circuito Sorpresa generado proceduralmente' } : PRESET_TRACKS[0]);
+  
+  // Determine if the currently selected track ID exists in the customTracks array
+  const isCustomSelected = customTracks.some(t => t.id === settings.trackId);
+
+  const startGame = () => {
+      let trackToPlay: TrackDefinition;
+      
+      if (settings.trackId === 'random') {
+          // Generate new random track and store it in activeTrack
+          trackToPlay = generateRandomTrack();
+      } else {
+          // Get existing track (Preset or Custom)
+          trackToPlay = getTrackById(settings.trackId, customTracks);
+      }
+      
+      setActiveTrack(trackToPlay);
+      setStatus(GameStatus.PLAYING);
+  };
   
   const pauseGame = () => {
     if (status === GameStatus.PLAYING) setStatus(GameStatus.PAUSED);
@@ -57,12 +98,56 @@ const App: React.FC = () => {
 
   const resetGame = () => {
     setStatus(GameStatus.MENU);
+    setShowSaveTrackModal(false);
   };
 
-  // Helper to find selected track details
-  const selectedTrack = settings.trackId === 'random' 
-      ? { name: 'RANDOM', description: 'Circuito Sorpresa generado proceduralmente' }
-      : PRESET_TRACKS.find(t => t.id === settings.trackId) || PRESET_TRACKS[0];
+  const handleDeleteTrack = (e: React.MouseEvent, id: string) => {
+      e.preventDefault(); 
+      e.stopPropagation(); // CRITICAL: Stop event from bubbling to parent select/div
+      
+      if (window.confirm("¿Seguro que quieres borrar este circuito permanentemente?")) {
+          const updated = deleteCustomTrack(id);
+          setCustomTracks(updated);
+          
+          // If we deleted the selected one, reset to default to avoid UI errors
+          if (settings.trackId === id) {
+              setSettings(prev => ({...prev, trackId: 'gp_circuit'}));
+          }
+      }
+  };
+
+  const handleSaveTrack = () => {
+      if (!activeTrack || !newTrackName) return;
+
+      const newId = `custom_${Date.now()}`;
+      const trackToSave: TrackDefinition = {
+          ...activeTrack,
+          id: newId,
+          name: newTrackName.toUpperCase(),
+          description: newTrackDesc || 'Circuito personalizado'
+      };
+
+      const updatedTracks = saveCustomTrack(trackToSave);
+      setCustomTracks(updatedTracks);
+      
+      // Auto-select the newly saved track in settings so it appears in the menu
+      setSettings(prev => ({ ...prev, trackId: newId }));
+
+      // Also download JSON
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(trackToSave, null, 2));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", `${newTrackName.toLowerCase().replace(/\s/g, '_')}.json`);
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+
+      setShowSaveTrackModal(false);
+      setNewTrackName('');
+      setNewTrackDesc('');
+      
+      alert("Circuito guardado en LocalStorage y descargado.");
+  };
 
   return (
     <div className="relative w-screen h-screen bg-black flex items-center justify-center overflow-hidden font-sans">
@@ -95,41 +180,33 @@ const App: React.FC = () => {
                 0% { transform: perspective(500px) rotateX(60deg) translateY(0); }
                 100% { transform: perspective(500px) rotateX(60deg) translateY(40px); }
               }
-              /* Neon Text Shadow */
               .neon-text {
                 text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 20px #0ff, 0 0 30px #0ff, 0 0 40px #0ff;
               }
               .neon-box {
                 box-shadow: 0 0 10px rgba(6,182,212,0.5), inset 0 0 20px rgba(6,182,212,0.2);
               }
-              /* Custom Scrollbar */
-              .custom-scrollbar::-webkit-scrollbar {
-                width: 6px;
-              }
-              .custom-scrollbar::-webkit-scrollbar-track {
-                background: rgba(255, 255, 255, 0.05);
-                border-radius: 4px;
-              }
-              .custom-scrollbar::-webkit-scrollbar-thumb {
-                background: rgba(6, 182, 212, 0.5);
-                border-radius: 4px;
-              }
-              .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                background: rgba(6, 182, 212, 0.8);
-              }
+              .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+              .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
+              .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(6, 182, 212, 0.5); border-radius: 4px; }
+              .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(6, 182, 212, 0.8); }
             `}</style>
          </div>
       </div>
 
       {/* Game Layer */}
       <div className={`absolute inset-0 z-0 transition-opacity duration-1000 ${status === GameStatus.MENU ? 'opacity-40' : 'opacity-100'}`}>
-        <GameCanvas 
-          status={status} 
-          settings={settings} 
-          onFinish={handleFinish} 
-          isPaused={status === GameStatus.PAUSED}
-          bestSpeed={bestSpeed}
-        />
+        {/* Only render GameCanvas if we have an active track or we are in playing/pause/over states where activeTrack persists */}
+        {activeTrack && (
+            <GameCanvas 
+            status={status} 
+            settings={settings}
+            trackDefinition={activeTrack}
+            onFinish={handleFinish} 
+            isPaused={status === GameStatus.PAUSED}
+            bestSpeed={bestSpeed}
+            />
+        )}
       </div>
 
       {/* UI Overlay: Pause Button */}
@@ -181,21 +258,43 @@ const App: React.FC = () => {
                   <span className="block text-xs font-bold text-pink-500 uppercase tracking-widest mb-2 flex items-center">
                     <Map size={12} className="mr-1"/> CIRCUITO
                   </span>
-                  <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
                       <select 
                         value={settings.trackId}
                         onChange={(e) => setSettings({...settings, trackId: e.target.value})}
-                        className="w-full bg-black text-white p-2 rounded border border-cyan-500/30 font-mono text-sm uppercase focus:outline-none focus:border-cyan-500"
+                        className="flex-1 bg-black text-white p-2 rounded border border-cyan-500/30 font-mono text-sm uppercase focus:outline-none focus:border-cyan-500 cursor-pointer"
                       >
-                         {PRESET_TRACKS.map(t => (
-                           <option key={t.id} value={t.id}>{t.name}</option>
-                         ))}
-                         <option value="random">⚡ Generar Aleatorio ⚡</option>
+                         <optgroup label="Oficiales">
+                            {PRESET_TRACKS.map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                         </optgroup>
+                         {customTracks.length > 0 && (
+                             <optgroup label="Mis Circuitos">
+                                {customTracks.map(t => (
+                                    <option key={t.id} value={t.id}>{t.name}</option>
+                                ))}
+                             </optgroup>
+                         )}
+                         <optgroup label="Procedural">
+                            <option value="random">⚡ Generar Aleatorio ⚡</option>
+                         </optgroup>
                       </select>
-                      <p className="text-gray-400 text-xs italic border-l-2 border-gray-600 pl-2">
-                        {selectedTrack.description}
-                      </p>
+                      
+                      {isCustomSelected && (
+                          <button 
+                            onClick={(e) => handleDeleteTrack(e, settings.trackId)}
+                            title="Eliminar Circuito"
+                            className="bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 text-red-500 p-2 rounded transition cursor-pointer flex-shrink-0 z-10"
+                            type="button"
+                          >
+                              <Trash2 size={18} />
+                          </button>
+                      )}
                   </div>
+                  <p className="text-gray-400 text-xs italic border-l-2 border-gray-600 pl-2 mt-2 h-8 flex items-center">
+                    {selectedTrackInfo?.description || '...'}
+                  </p>
               </div>
               
               {/* Difficulty */}
@@ -375,17 +474,15 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            {/* Score Saved Notification */}
-            {finalRank === 1 ? (
-                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-8 text-center">
-                    <p className="text-yellow-200 text-xs font-bold tracking-wider">NEW RECORD SAVED!</p>
-                </div>
-            ) : (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-8 text-center flex items-center justify-center gap-2">
-                    <Frown size={16} className="text-red-400"/>
-                    <p className="text-red-200 text-xs font-bold tracking-wider">
-                        {winnerName === 'CRASHED' ? 'TOO MUCH DAMAGE!' : 'RECORD NOT SAVED (DID NOT WIN)'}
-                    </p>
+            {/* SAVE TRACK BUTTON (If it was random) */}
+            {activeTrack && activeTrack.id.startsWith('random_') && (
+                <div className="mb-4">
+                     <button 
+                        onClick={() => setShowSaveTrackModal(true)}
+                        className="w-full bg-cyan-900/40 hover:bg-cyan-900/60 border border-cyan-500/30 text-cyan-200 font-bold py-2 rounded flex items-center justify-center transition"
+                     >
+                         <Save size={18} className="mr-2"/> GUARDAR CIRCUITO ALEATORIO
+                     </button>
                 </div>
             )}
 
@@ -399,6 +496,53 @@ const App: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {/* --- SAVE TRACK MODAL --- */}
+      {showSaveTrackModal && (
+          <div className="absolute inset-0 z-40 bg-black/80 backdrop-blur flex items-center justify-center">
+              <div className="bg-gray-900 border border-cyan-500 p-6 rounded-xl w-full max-w-sm shadow-[0_0_40px_rgba(6,182,212,0.4)] animate-in zoom-in duration-200">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-xl font-bold text-white flex items-center"><Save className="mr-2 text-cyan-400"/> GUARDAR CIRCUITO</h3>
+                      <button onClick={() => setShowSaveTrackModal(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-xs font-bold text-cyan-500 uppercase mb-1">Nombre</label>
+                          <input 
+                            type="text" 
+                            className="w-full bg-black/50 border border-gray-700 text-white p-2 rounded focus:border-cyan-500 outline-none"
+                            placeholder="Ej: Mi Pista Loca"
+                            value={newTrackName}
+                            onChange={(e) => setNewTrackName(e.target.value)}
+                            maxLength={20}
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-xs font-bold text-cyan-500 uppercase mb-1">Descripción</label>
+                          <textarea 
+                            className="w-full bg-black/50 border border-gray-700 text-white p-2 rounded focus:border-cyan-500 outline-none resize-none h-20 text-sm"
+                            placeholder="Descripción breve..."
+                            value={newTrackDesc}
+                            onChange={(e) => setNewTrackDesc(e.target.value)}
+                            maxLength={60}
+                          />
+                      </div>
+                      <div className="bg-gray-800 p-2 rounded text-xs text-gray-400 flex items-start">
+                          <Download size={14} className="mr-2 mt-1 flex-shrink-0"/>
+                          Al guardar, también se descargará el archivo .json para copia de seguridad.
+                      </div>
+                      <button 
+                        onClick={handleSaveTrack}
+                        disabled={!newTrackName}
+                        className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold py-2 rounded shadow-lg transition"
+                      >
+                          GUARDAR
+                      </button>
+                  </div>
+              </div>
+          </div>
       )}
 
     </div>

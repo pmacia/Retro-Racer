@@ -1,4 +1,3 @@
-
 import { TrackDefinition, TrackSection } from '../types';
 
 export const PRESET_TRACKS: TrackDefinition[] = [
@@ -114,14 +113,19 @@ export const generateRandomTrack = (): TrackDefinition => {
   sections.push({ type: 'STRAIGHT', length: 100 });
 
   return {
-    id: 'random',
+    id: `random_${Date.now()}`,
     name: 'Random Marathon',
     description: 'Un circuito generado proceduralmente. Largo, impredecible y desafiante.',
     layout: sections
   };
 };
 
-export const getTrackById = (id: string): TrackDefinition => {
+export const getAllTracks = (customTracks: TrackDefinition[] = []): TrackDefinition[] => {
+    return [...PRESET_TRACKS, ...customTracks];
+};
+
+export const getTrackById = (id: string, customTracks: TrackDefinition[] = []): TrackDefinition => {
   if (id === 'random') return generateRandomTrack();
-  return PRESET_TRACKS.find(t => t.id === id) || PRESET_TRACKS[0];
+  const all = getAllTracks(customTracks);
+  return all.find(t => t.id === id) || PRESET_TRACKS[0];
 };

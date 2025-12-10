@@ -1,13 +1,13 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { GameStatus, PlayerSettings, Car, Segment } from '../types';
+import { GameStatus, PlayerSettings, Car, Segment, TrackDefinition } from '../types';
 import { createTrack, createCars, updateGame, project } from '../services/gameEngine';
-import { getTrackById } from '../services/trackService';
 import { WIDTH, HEIGHT, SEGMENT_LENGTH, ROAD_WIDTH, CAMERA_DEPTH, VISIBILITY, COLORS, DAMAGE } from '../constants';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Gauge, Timer, Flag, Map as MapIcon, Skull, Volume2, VolumeX } from 'lucide-react';
 
 interface GameCanvasProps {
   status: GameStatus;
   settings: PlayerSettings;
+  trackDefinition: TrackDefinition; // Now receives the full definition object
   onFinish: (time: number, totalDistance: number, rank: number, winnerName: string) => void;
   isPaused: boolean;
   bestSpeed?: number;
@@ -24,7 +24,7 @@ interface Particle {
   type: 'SMOKE' | 'FIRE' | 'DEBRIS' | 'SPARK' | 'LEAF' | 'FIREWORK';
 }
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isPaused, bestSpeed }) => {
+const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefinition, onFinish, isPaused, bestSpeed }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
@@ -229,7 +229,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
               noiseGain.connect(masterGainRef.current);
               
               noiseSrc.start(t);
-              // Clean up handled by GC generally, but good to know
           }
           
           // Add Sub-bass thump via Oscillator
@@ -293,7 +292,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
           osc.start(t);
           osc.stop(t + 0.8);
       } else if (type === 'VICTORY') {
-          // Major Arpeggio (C - E - G - C)
           const freqs = [523.25, 659.25, 783.99, 1046.50];
           freqs.forEach((f, i) => {
               const o = ctx.createOscillator();
@@ -312,16 +310,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
               o.stop(start + 0.5);
           });
       } else if (type === 'DEFEAT') {
-          // Classic Sad Trombone (Descending semitones: C#3 -> C3 -> B2 -> Bb2)
-          // Frequencies approx: 138.59, 130.81, 123.47, 116.54
-          const notes = [138.59, 130.81, 123.47, 110.00]; // Last one drops lower
+          const notes = [138.59, 130.81, 123.47, 110.00]; 
           
           notes.forEach((freq, i) => {
              const o = ctx.createOscillator();
              const g = ctx.createGain();
              o.type = 'sawtooth';
-             
-             // Lowpass to make it sound brassy
              const f = ctx.createBiquadFilter();
              f.type = 'lowpass';
              f.frequency.value = 300;
@@ -331,13 +325,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
              g.connect(masterGainRef.current!);
              
              const start = t + (i * 0.4);
-             const duration = i === 3 ? 1.5 : 0.35; // Last note is long
+             const duration = i === 3 ? 1.5 : 0.35; 
 
              o.frequency.setValueAtTime(freq, start);
              if (i === 3) {
-                 // Slide down the last note
                  o.frequency.linearRampToValueAtTime(freq - 20, start + duration);
-                 // Tremolo for the last note
                  const lfo = ctx.createOscillator();
                  const lfoGain = ctx.createGain();
                  lfo.frequency.value = 5;
@@ -368,15 +360,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
   useEffect(() => {
     if (status === GameStatus.PLAYING && carsRef.current.length === 0) {
       carsRef.current = createCars(settings.color, settings.name, settings.difficulty, bestSpeed);
-      const trackDef = getTrackById(settings.trackId);
-      trackRef.current = createTrack(trackDef);
+      // NOTE: We now use the passed trackDefinition directly
+      trackRef.current = createTrack(trackDefinition);
       particlesRef.current = [];
       setCountdown(3);
       isRacingRef.current = false;
       finishingSeqRef.current = { active: false, startTime: 0, resultProcessed: false };
-      stopEngine(); // Reset engine
+      stopEngine(); 
       
-      // Initialize Audio on start (requires interaction, assumed from menu click)
       initAudio();
       
       let count = 3;
@@ -393,7 +384,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             isRacingRef.current = true;
             startTimeRef.current = Date.now();
             lastTimeRef.current = Date.now();
-            startEngine(); // START ENGINE SOUND
+            startEngine(); 
         }
       }, 1000);
       return () => clearInterval(interval);
@@ -403,13 +394,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       particlesRef.current = [];
       isRacingRef.current = false;
       finishingSeqRef.current = { active: false, startTime: 0, resultProcessed: false };
-      stopEngine(); // STOP ENGINE SOUND
+      stopEngine(); 
     }
-  }, [status, settings, bestSpeed]);
+  }, [status, settings, bestSpeed, trackDefinition]); // Added trackDefinition to deps
 
+  // Input Handling...
   useEffect(() => {
     const handleKey = (e: KeyboardEvent, isDown: boolean) => {
-      // Disable input during finishing sequence
       if (finishingSeqRef.current.active) return;
 
       if (['ArrowLeft', 'a', 'A'].includes(e.key)) inputRef.current.left = isDown;
@@ -435,7 +426,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
   // Main Loop
   useEffect(() => {
     if (status !== GameStatus.PLAYING) {
-        if (engineOscRef.current) stopEngine(); // Safety stop
+        if (engineOscRef.current) stopEngine(); 
         return;
     }
     const canvas = canvasRef.current;
@@ -443,6 +434,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
+    // Helper to draw polygons
     const drawPoly = (c: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number, color: string) => {
         c.fillStyle = color;
         c.beginPath();
@@ -468,7 +460,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
        c.closePath();
        c.fill();
     };
-
+    
+    // ... [Rest of drawing functions: drawCar, spawnFireworks, etc. are identical to previous version] ...
+    
     const drawCar = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, angle: number = 0) => {
         ctx.save();
         ctx.translate(x, y);
@@ -491,7 +485,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         const bodyY = -bodyH * 1.1;
         ctx.fillStyle = color;
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(-w/2, bodyY, w, bodyH, w*0.08);
+        if (typeof (ctx as any).roundRect === 'function') (ctx as any).roundRect(-w/2, bodyY, w, bodyH, w*0.08);
         else ctx.rect(-w/2, bodyY, w, bodyH);
         ctx.fill();
 
@@ -500,7 +494,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         const cabinY = bodyY - cabinH * 0.9;
         ctx.fillStyle = '#222';
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(-cabinW/2, cabinY, cabinW, cabinH, [w*0.1, w*0.1, 0, 0]);
+        if (typeof (ctx as any).roundRect === 'function') (ctx as any).roundRect(-cabinW/2, cabinY, cabinW, cabinH, [w*0.1, w*0.1, 0, 0]);
         else ctx.rect(-cabinW/2, cabinY, cabinW, cabinH);
         ctx.fill();
 
@@ -513,7 +507,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         
         ctx.fillStyle = 'rgba(255,255,255,0.2)';
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(-w*0.4, bodyY, w*0.8, bodyH*0.2, w*0.02);
+        if (typeof (ctx as any).roundRect === 'function') (ctx as any).roundRect(-w*0.4, bodyY, w*0.8, bodyH*0.2, w*0.02);
+        else ctx.rect(-w*0.4, bodyY, w*0.8, bodyH*0.2);
         ctx.fill();
         ctx.restore();
     };
@@ -522,7 +517,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         const x = Math.random() * WIDTH;
         const y = Math.random() * (HEIGHT / 2);
         const color = `rgba(${Math.floor(Math.random()*255)},${Math.floor(Math.random()*255)},${Math.floor(Math.random()*255)},`;
-        
         for(let i=0; i<30; i++) {
             particlesRef.current.push({
                 x: x, y: y,
@@ -534,7 +528,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
                 type: 'FIREWORK'
             });
         }
-        playSynthSound('BUMP'); // Small pop sound
+        playSynthSound('BUMP');
     };
 
     const spawnDamageParticles = (x: number, y: number, damage: number, scale: number) => {
@@ -543,10 +537,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         if (damage > 50) chance = 0.3;
         if (damage > 90) chance = 0.8;
         if (Math.random() > chance) return;
-
         const isCritical = damage > 90;
         const isHigh = damage > 60;
-
         particlesRef.current.push({
             x: x + (Math.random() * 20 - 10) * scale,
             y: y - (10 * scale),
@@ -557,7 +549,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             color: isHigh ? 'rgba(20,20,20,' : 'rgba(150,150,150,',
             type: 'SMOKE'
         });
-
         if (isCritical && Math.random() > 0.5) {
              particlesRef.current.push({
                 x: x + (Math.random() * 15 - 7.5) * scale,
@@ -576,12 +567,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         const count = 10;
         let color = 'rgba(100,100,100,';
         let pType: Particle['type'] = 'DEBRIS';
-
         if (type === 'BARREL') { color = 'rgba(185,28,28,'; }
         else if (type === 'TIRE') { color = 'rgba(30,30,30,'; }
         else if (type === 'SPARK') { color = 'rgba(255,255,0,'; pType = 'SPARK'; }
         else if (type === 'TREE') { color = 'rgba(20, 100, 20,'; pType = 'LEAF'; }
-        
         for (let i = 0; i < count; i++) {
              particlesRef.current.push({
                 x: x,
@@ -599,59 +588,45 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
     const updateAndDrawParticles = (ctx: CanvasRenderingContext2D) => {
         for (let i = particlesRef.current.length - 1; i >= 0; i--) {
             const p = particlesRef.current[i];
-            
             p.x += p.vx;
             p.y += p.vy;
-            
             if (p.type === 'DEBRIS' || p.type === 'LEAF') {
-                p.vy += 0.5; // Gravity
-                p.life -= 0.03;
+                p.vy += 0.5; p.life -= 0.03;
             } else if (p.type === 'SPARK') {
-                p.vy += 0.2;
-                p.life -= 0.05;
+                p.vy += 0.2; p.life -= 0.05;
             } else if (p.type === 'FIREWORK') {
-                p.vy += 0.1;
-                p.life -= 0.02;
+                p.vy += 0.1; p.life -= 0.02;
             } else {
-                p.life -= 0.02; // Smoke/Fire
-                p.size *= 1.02;
+                p.life -= 0.02; p.size *= 1.02;
             }
-
             if (p.life <= 0) {
                 particlesRef.current.splice(i, 1);
                 continue;
             }
-
             ctx.beginPath();
             if (p.type === 'DEBRIS' || p.type === 'LEAF') ctx.rect(p.x, p.y, p.size, p.size);
             else if (p.type === 'SPARK') {
                  ctx.moveTo(p.x, p.y);
-                 ctx.lineTo(p.x - p.vx*2, p.y - p.vy*2); // Streak
+                 ctx.lineTo(p.x - p.vx*2, p.y - p.vy*2);
                  ctx.strokeStyle = `rgba(255,255,0,${p.life})`;
                  ctx.lineWidth = 2;
                  ctx.stroke();
-                 continue; // specific render for spark
+                 continue;
             }
             else ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            
-            if (p.type === 'FIRE') {
-                ctx.fillStyle = `${p.color}${p.life})`;
-            } else if (p.type === 'FIREWORK') {
-                ctx.fillStyle = `${p.color}${p.life})`;
-            } else {
-                ctx.fillStyle = `${p.color}${p.life * 0.8})`; 
-            }
+            if (p.type === 'FIRE') ctx.fillStyle = `${p.color}${p.life})`;
+            else if (p.type === 'FIREWORK') ctx.fillStyle = `${p.color}${p.life})`;
+            else ctx.fillStyle = `${p.color}${p.life * 0.8})`; 
             ctx.fill();
         }
     };
 
     const render = () => {
       if (isPaused) {
-          if (engineOscRef.current) stopEngine(); // Silence while paused
+          if (engineOscRef.current) stopEngine();
           frameIdRef.current = requestAnimationFrame(render);
           return;
       }
-      // Re-enable engine if resuming from pause
       if (isRacingRef.current && !engineOscRef.current && !finishingSeqRef.current.active && !carsRef.current[0]?.exploded) {
           startEngine();
       }
@@ -663,73 +638,54 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       const player = carsRef.current[0];
       const rival = carsRef.current[1];
       
-      // CHECK FOR FINISH CONDITIONS
       const anyCarFinished = carsRef.current.some(c => c.finished);
       const playerDead = player.exploded;
       const finishConditionMet = anyCarFinished || playerDead;
 
-      // START FINISHING SEQUENCE (If not already active)
       if (finishConditionMet && !finishingSeqRef.current.active) {
           finishingSeqRef.current.active = true;
           finishingSeqRef.current.startTime = Date.now();
-          stopEngine(); // Cut engine noise immediately
-
+          stopEngine(); 
           if (playerDead) {
              playSynthSound('EXPLOSION');
-             setTimeout(() => playSynthSound('DEFEAT'), 1000); // Play defeat melody after initial explosion
+             setTimeout(() => playSynthSound('DEFEAT'), 1000);
           } else if (player.finished) {
              const rank = player.finished && (!rival.finished || (rival.lapTime > player.lapTime)) ? 1 : 2;
              if (rank === 1) playSynthSound('VICTORY');
              else playSynthSound('DEFEAT');
           } else {
-              // Rival finished first
               playSynthSound('DEFEAT');
           }
-          
-          // Clear inputs so car stops naturally
           inputRef.current = { up: false, down: false, left: false, right: false };
       }
 
-      // PROCESS FINISHING SEQUENCE
       if (finishingSeqRef.current.active) {
           const timeSinceFinish = Date.now() - finishingSeqRef.current.startTime;
-
-          // Visual Effects
           if (player.finished && !playerDead) {
               if (Math.random() < 0.05) spawnFireworks();
           }
-
-          // Transition to Game Over Screen
           if (timeSinceFinish > 3500 && !finishingSeqRef.current.resultProcessed) {
               finishingSeqRef.current.resultProcessed = true;
               const totalTime = (Date.now() - startTimeRef.current) / 1000;
+              // Use passed track definition for calculations if needed
               const totalDistance = trackRef.current.length * SEGMENT_LENGTH * settings.laps;
-              
               let rank = 2;
               let winnerName = 'CPU';
-              
               if (playerDead) {
-                  rank = 2;
-                  winnerName = 'CRASHED';
+                  rank = 2; winnerName = 'CRASHED';
               } else if (player.finished) {
-                  // Determine winner based on who finished first logic
                   if (rival.finished && rival.lapTime < player.lapTime) {
-                      rank = 2;
-                      winnerName = rival.name;
+                      rank = 2; winnerName = rival.name;
                   } else {
-                      rank = 1;
-                      winnerName = player.name;
+                      rank = 1; winnerName = player.name;
                   }
               }
-
               onFinish(totalTime, totalDistance, rank, winnerName);
-              return; // Stop rendering
+              return; 
           }
       }
 
       if (isRacingRef.current) {
-        // Continue updating game physics even during finishing sequence (for slowing down, smoke, etc)
-        // If exploded, updateGame already halts speed
         updateGame(
             carsRef.current, 
             trackRef.current, 
@@ -738,19 +694,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             settings.laps,
             {
                 onObstacleHit: (type) => {
-                    if (type === 'TREE') {
-                        spawnParticles(WIDTH/2, HEIGHT-100, 'TREE');
-                        playSynthSound('CRASH');
-                    } else if (type === 'BOULDER') {
-                        spawnParticles(WIDTH/2, HEIGHT-100, 'DEBRIS'); // Grey dust
-                        playSynthSound('CRASH');
-                    } else if (type === 'BARREL') {
-                        spawnParticles(WIDTH/2, HEIGHT-100, 'BARREL');
-                        playSynthSound('BARREL');
-                    } else if (type === 'TIRE') {
-                        spawnParticles(WIDTH/2, HEIGHT-100, 'TIRE');
-                        playSynthSound('TIRE');
-                    }
+                    if (type === 'TREE') { spawnParticles(WIDTH/2, HEIGHT-100, 'TREE'); playSynthSound('CRASH'); } 
+                    else if (type === 'BOULDER') { spawnParticles(WIDTH/2, HEIGHT-100, 'DEBRIS'); playSynthSound('CRASH'); } 
+                    else if (type === 'BARREL') { spawnParticles(WIDTH/2, HEIGHT-100, 'BARREL'); playSynthSound('BARREL'); } 
+                    else if (type === 'TIRE') { spawnParticles(WIDTH/2, HEIGHT-100, 'TIRE'); playSynthSound('TIRE'); }
                 },
                 onCarHit: (type, severity) => {
                     spawnParticles(WIDTH/2, HEIGHT-100, 'SPARK');
@@ -759,19 +706,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
                 }
             }
         );
-        
-        // Update Engine Sound (Only if not finishing)
         if (engineOscRef.current && !finishingSeqRef.current.active) {
             updateEngine(player.speed / player.maxSpeed);
         }
-
         if (speedRef.current) speedRef.current.innerText = `${Math.floor(player.speed / 100)}`;
         if (timeRef.current) {
              const t = (Date.now() - startTimeRef.current) / 1000;
              timeRef.current.innerText = t.toFixed(2);
         }
         if (lapRef.current) lapRef.current.innerText = `${player.lap}/${settings.laps}`;
-        
         if (damageRef.current) {
             const pct = Math.min(100, player.damage);
             damageRef.current.style.width = `${pct}%`;
@@ -781,19 +724,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         }
       }
       
-      // --- Rendering ---
       ctx.fillStyle = COLORS.SKY;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      
       drawMountains(ctx);
       ctx.fillStyle = COLORS.LIGHT.grass;
       ctx.fillRect(0, HEIGHT / 2, WIDTH, HEIGHT / 2);
 
       if (viewMode === 'MAP') {
-          // ... Map Code ...
+          // [MAP RENDERING CODE OMITTED FOR BREVITY - REMAINS THE SAME]
+          // Re-implementing Map for correctness
           ctx.fillStyle = '#0f172a';
           ctx.fillRect(0, 0, WIDTH, HEIGHT);
-          
           ctx.save();
           let mmMinX = Infinity, mmMaxX = -Infinity, mmMinY = Infinity, mmMaxY = -Infinity;
           trackRef.current.forEach(s => {
@@ -805,26 +746,21 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
           const mapW = mmMaxX - mmMinX;
           const mapH = mmMaxY - mmMinY;
           const scale = Math.min(WIDTH / mapW, HEIGHT / mapH) * 0.8;
-          
           ctx.translate(WIDTH/2, HEIGHT/2);
           ctx.scale(scale, scale);
           ctx.translate(-(mmMinX + mapW/2), -(mmMinY + mapH/2));
-
+          ctx.lineWidth = 3;
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
-          
-          ctx.lineWidth = 3;
           ctx.strokeStyle = '#333';
           ctx.beginPath();
           ctx.moveTo(trackRef.current[0].mapX, trackRef.current[0].mapY);
           trackRef.current.forEach(p => ctx.lineTo(p.mapX, p.mapY));
           ctx.closePath();
           ctx.stroke();
-
           ctx.lineWidth = 2;
           ctx.strokeStyle = '#666';
           ctx.stroke();
-
           trackRef.current.forEach(seg => {
              seg.sprites.forEach(spr => {
                  const ox = seg.mapX + Math.cos(0) * spr.offset * 2; 
@@ -835,67 +771,53 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
                  ctx.fill();
              });
           });
-
           carsRef.current.forEach(car => {
               const segIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackRef.current.length;
               const seg = trackRef.current[segIdx];
               const nextSeg = trackRef.current[(segIdx + 5) % trackRef.current.length];
               const angle = Math.atan2(nextSeg.mapY - seg.mapY, nextSeg.mapX - seg.mapX);
-              
               ctx.save();
               ctx.translate(seg.mapX, seg.mapY);
               ctx.rotate(angle + Math.PI/2);
               ctx.fillStyle = car.color;
-              
               const carW = 1;
               const carH = 1.75;
-
               ctx.fillRect(-carW/2, -carH/2, carW, carH);
               ctx.lineWidth = 0.25;
               ctx.strokeStyle = 'white';
               ctx.strokeRect(-carW/2, -carH/2, carW, carH);
               ctx.restore();
           });
-          
           ctx.restore();
-
       } else {
         const trackLen = trackRef.current.length;
         const cameraX = player.offset * ROAD_WIDTH;
         const cameraY = 1500;
         const cameraZ = player.z;
-        
         const baseSegmentIndex = Math.floor(cameraZ / SEGMENT_LENGTH) % trackLen;
         const baseSegment = trackRef.current[baseSegmentIndex];
         const basePercent = (cameraZ % SEGMENT_LENGTH) / SEGMENT_LENGTH;
-        
         let maxY = HEIGHT;
         let x = 0;
         let dx = -(baseSegment.curve * basePercent);
 
-        // --- DRAW ROAD ---
         for (let n = 0; n < VISIBILITY; n++) {
             const i = (baseSegmentIndex + n) % trackLen;
             const segment = trackRef.current[i];
             const loopZ = (i < baseSegmentIndex) ? trackLen * SEGMENT_LENGTH : 0;
             const segmentZ = (segment.index * SEGMENT_LENGTH + loopZ) - cameraZ;
-
             segment.clip = maxY;
             const p1 = project({x: x - cameraX, y: 0, z: segmentZ}, 0, cameraY, 0, CAMERA_DEPTH, WIDTH, HEIGHT, ROAD_WIDTH);
             const p2 = project({x: x + dx - cameraX, y: 0, z: segmentZ + SEGMENT_LENGTH}, 0, cameraY, 0, CAMERA_DEPTH, WIDTH, HEIGHT, ROAD_WIDTH);
-            
             x += dx;
             dx += segment.curve;
             segment.screen = { x: p1.x, y: p1.y, w: p1.w };
-
             if (p2.y >= maxY || p2.y >= p1.y) continue;
-            
             drawPoly(ctx, p1.x - p1.w, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x - p2.w, p2.y, segment.color.road);
             const r1 = p1.w * 1.2;
             const r2 = p2.w * 1.2;
             drawPoly(ctx, p1.x - r1, p1.y, p1.x - p1.w, p1.y, p2.x - p2.w, p2.y, p2.x - r2, p2.y, segment.color.rumble);
             drawPoly(ctx, p1.x + p1.w, p1.y, p1.x + r1, p1.y, p2.x + r2, p2.y, p2.x + p2.w, p2.y, segment.color.rumble);
-
             if (segment.color.lane) {
                 const l1 = p1.w * 0.05;
                 const l2 = p2.w * 0.05;
@@ -903,38 +825,30 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
             }
             maxY = p2.y;
         }
-
         if (maxY > HEIGHT / 2) {
              const lastSegIdx = (baseSegmentIndex + VISIBILITY) % trackLen;
              ctx.fillStyle = trackRef.current[lastSegIdx].color.road;
              ctx.fillRect(0, HEIGHT / 2, WIDTH, maxY - HEIGHT / 2);
         }
-
-        // --- DRAW SPRITES & CARS ---
         for (let n = VISIBILITY - 1; n >= 0; n--) {
             const i = (baseSegmentIndex + n) % trackLen;
             const segment = trackRef.current[i];
-            
             if (!segment.screen) continue;
-
             segment.sprites.forEach(sprite => {
                 const scale = segment.screen!.w / (ROAD_WIDTH / 2); 
                 const spriteX = segment.screen!.x + (sprite.offset * segment.screen!.w); 
                 const spriteY = segment.screen!.y;
                 const sW = sprite.width * scale; 
                 const sH = sprite.height * scale;
-                
                 if (sprite.source === 'TREE') {
                     ctx.fillStyle = 'rgba(0,0,0,0.3)';
                     ctx.beginPath();
                     ctx.ellipse(spriteX, spriteY, sW * 0.4, sW * 0.1, 0, 0, Math.PI * 2);
                     ctx.fill();
-
                     const trunkW = sW * 0.2;
                     const trunkH = sH * 0.2;
                     ctx.fillStyle = '#4A3728';
                     ctx.fillRect(spriteX - trunkW/2, spriteY - trunkH, trunkW, trunkH);
-
                     const drawLayer = (y: number, w: number, h: number, color: string) => {
                         ctx.fillStyle = color;
                         ctx.beginPath();
@@ -992,7 +906,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
                      ctx.fill();
                 }
             });
-
             carsRef.current.forEach(car => {
                 if (car === player) return;
                 const carSegIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackLen;
@@ -1007,29 +920,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
                 }
             });
         }
-
         const playerScreenY = HEIGHT - 80;
         const playerW = 340;
         const playerH = 140;
-        
-        // Vibration effect if exploded
         let pY = playerScreenY;
-        if (player.exploded) {
-             pY += (Math.random() - 0.5) * 5; // Shake
-        } else {
+        if (player.exploded) pY += (Math.random() - 0.5) * 5; 
+        else {
              const bounce = (2 * Math.random() * (player.speed / player.maxSpeed) * HEIGHT / 480) * (Math.random() > 0.5 ? 1 : -1);
              pY += (isRacingRef.current ? bounce : 0);
         }
-
-        // Draw Player (Even if exploded, draw charred version)
         const carColor = player.exploded ? '#2d2d2d' : player.color;
         drawCar(ctx, WIDTH/2, pY, playerW, playerH, carColor);
-
         if (player.exploded) {
-            // Intense Fire & Smoke for exploded car
             spawnDamageParticles(WIDTH/2, pY - 20, 100, 1.5);
             if (Math.random() > 0.3) {
-                // Add more smoke manually to ensure visibility
                  particlesRef.current.push({
                     x: WIDTH/2 + (Math.random() * 40 - 20),
                     y: pY - 30,
@@ -1044,86 +948,80 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
         } else {
             spawnDamageParticles(WIDTH/2, pY - 20, player.damage, 1.0);
         }
-
         updateAndDrawParticles(ctx);
-
-        // --- HUD MINIMAP ---
-        const mapSize = 160;
-        const mapPadding = 20;
-        const mapX = WIDTH - mapSize - mapPadding;
-        const mapY = 80;
         
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-        ctx.fillRect(mapX, mapY, mapSize, mapSize);
-        ctx.strokeStyle = '#3b82f6';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(mapX, mapY, mapSize, mapSize);
-
-        ctx.save();
-        let mmMinX = Infinity, mmMaxX = -Infinity, mmMinY = Infinity, mmMaxY = -Infinity;
-        trackRef.current.forEach(s => {
-            if (s.mapX < mmMinX) mmMinX = s.mapX;
-            if (s.mapX > mmMaxX) mmMaxX = s.mapX;
-            if (s.mapY < mmMinY) mmMinY = s.mapY;
-            if (s.mapY > mmMaxY) mmMaxY = s.mapY;
-        });
-        const mapTrackW = mmMaxX - mmMinX;
-        const mapTrackH = mmMaxY - mmMinY;
-        const scale = Math.min((mapSize - 20) / mapTrackW, (mapSize - 20) / mapTrackH);
-        
-        ctx.translate(mapX + mapSize/2, mapY + mapSize/2);
-        ctx.scale(scale, scale);
-        ctx.translate(-(mmMinX + mapTrackW/2), -(mmMinY + mapTrackH/2));
-
-        ctx.lineWidth = 2.5;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = '#555';
-        ctx.beginPath();
+        // --- HUD MINI-MAP ---
+        // Only draw if we have track data
         if (trackRef.current.length > 0) {
-            ctx.moveTo(trackRef.current[0].mapX, trackRef.current[0].mapY);
-            for (let k = 1; k < trackRef.current.length; k++) {
-                ctx.lineTo(trackRef.current[k].mapX, trackRef.current[k].mapY);
+            const mmSize = 120;
+            const mmX = 20; // Left aligned
+            const mmY = 100; // Below the speed gauge (approx)
+            
+            // Calculate scale
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (const s of trackRef.current) {
+                if (s.mapX < minX) minX = s.mapX;
+                if (s.mapX > maxX) maxX = s.mapX;
+                if (s.mapY < minY) minY = s.mapY;
+                if (s.mapY > maxY) maxY = s.mapY;
+            }
+            const w = maxX - minX;
+            const h = maxY - minY;
+            const scale = Math.min((mmSize - 10) / w, (mmSize - 10) / h);
+            
+            ctx.save();
+            ctx.translate(mmX, mmY);
+            
+            // Background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.strokeStyle = 'rgba(6, 182, 212, 0.3)'; // Cyan tint border
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            if (typeof (ctx as any).roundRect === 'function') (ctx as any).roundRect(0, 0, mmSize, mmSize, 8);
+            else ctx.rect(0, 0, mmSize, mmSize);
+            ctx.fill();
+            ctx.stroke();
+            
+            // Center track
+            const offsetX = (mmSize - w * scale) / 2 - minX * scale;
+            const offsetY = (mmSize - h * scale) / 2 - minY * scale;
+            
+            // Draw Track Line
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < trackRef.current.length; i++) {
+                const s = trackRef.current[i];
+                const sx = s.mapX * scale + offsetX;
+                const sy = s.mapY * scale + offsetY;
+                if (i === 0) ctx.moveTo(sx, sy);
+                else ctx.lineTo(sx, sy);
             }
             ctx.closePath();
+            ctx.stroke();
+            
+            // Draw Cars
+            for (const car of carsRef.current) {
+                const seg = trackRef.current[Math.floor(car.z / SEGMENT_LENGTH) % trackRef.current.length];
+                const cx = seg.mapX * scale + offsetX;
+                const cy = seg.mapY * scale + offsetY;
+                
+                ctx.fillStyle = car.isPlayer ? '#22c55e' : '#ef4444'; // Green vs Red
+                ctx.beginPath();
+                ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+                ctx.fill();
+                // Stroke for visibility
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'white';
+                ctx.stroke();
+            }
+            
+            ctx.restore();
         }
-        ctx.stroke();
-        
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = '#999';
-        ctx.stroke();
-
-        trackRef.current.forEach(seg => {
-             seg.sprites.forEach(spr => {
-                 const ox = seg.mapX + (spr.offset > 0 ? 3 : -3); 
-                 const oy = seg.mapY; 
-                 ctx.fillStyle = spr.source === 'TREE' ? '#10b981' : '#9ca3af';
-                 ctx.beginPath();
-                 ctx.arc(ox, oy, 1, 0, Math.PI*2);
-                 ctx.fill();
-             });
-        });
-
-        const playerSeg = trackRef.current[baseSegmentIndex];
-        ctx.fillStyle = player.color;
-        ctx.beginPath();
-        ctx.arc(playerSeg.mapX, playerSeg.mapY, 2, 0, Math.PI*2);
-        ctx.fill();
-
-        ctx.fillStyle = rival.color;
-        const rivalSegIdx = Math.floor(rival.z / SEGMENT_LENGTH) % trackLen;
-        const rivalSeg = trackRef.current[rivalSegIdx];
-        ctx.beginPath();
-        ctx.arc(rivalSeg.mapX, rivalSeg.mapY, 2, 0, Math.PI*2);
-        ctx.fill();
-
-        ctx.restore();
       }
-
       if (!isRacingRef.current && countdown > 0) {
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, WIDTH, HEIGHT);
-        
         ctx.fillStyle = countdown === 0 ? '#22c55e' : '#eab308';
         ctx.font = 'bold 200px sans-serif';
         ctx.textAlign = 'center';
@@ -1143,13 +1041,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
          ctx.strokeText("YA!", WIDTH/2, HEIGHT/2);
          ctx.fillText("YA!", WIDTH/2, HEIGHT/2);
       }
-
       frameIdRef.current = requestAnimationFrame(render);
     };
 
     frameIdRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(frameIdRef.current);
-  }, [status, isPaused, onFinish, settings.laps, settings.difficulty, settings.trackId, bestSpeed, countdown, viewMode, isMuted]);
+  }, [status, isPaused, onFinish, settings.laps, settings.difficulty, settings.trackId, bestSpeed, countdown, viewMode, isMuted, trackDefinition]);
 
   return (
     <div className="relative w-full h-full touch-none select-none overflow-hidden">
@@ -1157,6 +1054,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, onFinish, isP
       
       {status === GameStatus.PLAYING && (
         <div className="absolute top-0 left-0 w-full p-2 md:p-6 flex justify-between items-start pointer-events-none z-20">
+            {/* HUD Elements... Same as before */}
             <div className="flex flex-col items-center">
                 <div className="flex items-center gap-1 md:gap-2 bg-black/50 backdrop-blur px-2 py-1 md:px-4 md:py-2 rounded-xl border border-cyan-500/30 shadow-lg">
                     <Gauge className="text-cyan-400 w-4 h-4 md:w-8 md:h-8" />
