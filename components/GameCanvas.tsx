@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState } from 'react';
 import { GameStatus, PlayerSettings, Car, Segment, TrackDefinition } from '../types';
 import { createTrack, createCars, updateGame, project } from '../services/gameEngine';
@@ -622,6 +623,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
     };
 
     const render = () => {
+      // --- CRITICAL FIX START ---
+      // If data is not yet initialized (Race Condition fix), wait for next frame.
+      if (trackRef.current.length === 0 || carsRef.current.length === 0) {
+          frameIdRef.current = requestAnimationFrame(render);
+          return;
+      }
+      // --- CRITICAL FIX END ---
+
       if (isPaused) {
           if (engineOscRef.current) stopEngine();
           frameIdRef.current = requestAnimationFrame(render);
