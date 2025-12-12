@@ -53,24 +53,7 @@ const App: React.FC = () => {
   // Determine if the currently selected track ID exists in the customTracks array
   const isCustomSelected = customTracks.some(t => t.id === settings.trackId);
 
-  // --- AUDIO UNLOCKER FOR LOCALHOST ---
-  // Browsers block AudioContext if created inside useEffect. We must create/resume it
-  // on a direct user gesture (Clicking Start).
-  const unlockAudio = () => {
-    const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioCtor) {
-      const ctx = new AudioCtor();
-      ctx.resume().then(() => {
-        // Immediately close it, we just wanted to "bless" the page gesture
-        ctx.close();
-      });
-    }
-  };
-
   const startGame = () => {
-      // 1. Unlock Audio immediately on user interaction
-      unlockAudio();
-
       let trackToPlay: TrackDefinition;
       
       if (settings.trackId === 'random') {
