@@ -4,6 +4,8 @@ import { GameStatus, PlayerSettings, Car, Segment, TrackDefinition } from '../ty
 import { createTrack, createCars, updateGame, project } from '../services/gameEngine';
 import { WIDTH, HEIGHT, SEGMENT_LENGTH, ROAD_WIDTH, CAMERA_DEPTH, VISIBILITY, COLORS } from '../constants';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Gauge, Timer, Flag, Map as MapIcon, Skull, Volume2, VolumeX } from 'lucide-react';
+import { initAudio, startEngine, updateEngine, stopEngine, setMuted, isEngineRunning } from '../services/audio/audioEngine';
+import { playSound } from '../services/audio/soundEffects';
 
 interface GameCanvasProps {
     status: GameStatus;
@@ -27,14 +29,6 @@ interface Particle {
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefinition, onFinish, isPaused, bestSpeed }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const audioCtxRef = useRef<AudioContext | null>(null);
-    const masterGainRef = useRef<GainNode | null>(null);
-    const noiseBufferRef = useRef<AudioBuffer | null>(null);
-
-    // Engine Sound Refs
-    const engineOscRef = useRef<OscillatorNode | null>(null);
-    const engineModRef = useRef<OscillatorNode | null>(null); // For the "rumble"
-    const engineGainRef = useRef<GainNode | null>(null);
 
     // Game State
     const carsRef = useRef<Car[]>([]);
@@ -67,291 +61,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
     const [activeView, setActiveView] = useState<number>(0); // 0=Player, 1=Rival, 2=Split
     const [isMuted, setIsMuted] = useState<boolean>(false);
 
-    // --- AUDIO SYSTEM (Procedural Synth) ---
-    const initAudio = () => {
-        if (!audioCtxRef.current) {
-            const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
-            if (AudioCtor) {
-                audioCtxRef.current = new AudioCtor();
-
-                // Create Master Gain for Mute Control
-                const master = audioCtxRef.current.createGain();
-                master.gain.value = isMuted ? 0 : 0.5; // Default volume 50%
-                master.connect(audioCtxRef.current.destination);
-                masterGainRef.current = master;
-
-                // Generate White Noise Buffer (for explosions)
-                const bufferSize = audioCtxRef.current.sampleRate * 2; // 2 seconds of noise
-                const buffer = audioCtxRef.current.createBuffer(1, bufferSize, audioCtxRef.current.sampleRate);
-                const data = buffer.getChannelData(0);
-                for (let i = 0; i < bufferSize; i++) {
-                    data[i] = Math.random() * 2 - 1;
-                }
-                noiseBufferRef.current = buffer;
-
-                audioCtxRef.current.resume();
-            }
-        }
-    };
-
+    // Toggle mute handler using audio service
     const toggleMute = () => {
         setIsMuted(prev => {
             const newState = !prev;
-            if (masterGainRef.current && audioCtxRef.current) {
-                // Smooth transition to avoid clicking
-                masterGainRef.current.gain.setTargetAtTime(newState ? 0 : 0.5, audioCtxRef.current.currentTime, 0.1);
-            }
+            setMuted(newState);
             return newState;
         });
-    };
-
-    const startEngine = () => {
-        if (!audioCtxRef.current) initAudio();
-        if (!audioCtxRef.current || !masterGainRef.current) return;
-
-        const ctx = audioCtxRef.current;
-
-        // Stop existing if any
-        stopEngine();
-
-        // Main Tone (Sawtooth for raw engine sound)
-        const osc = ctx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.value = 60; // Idle RPM
-
-        // Modulator (for the "purr" or rumble)
-        const mod = ctx.createOscillator();
-        mod.type = 'square';
-        mod.frequency.value = 15; // Idle rumble speed
-
-        const modGain = ctx.createGain();
-        modGain.gain.value = 20; // Depth of rumble
-
-        // Master Engine Gain
-        const gain = ctx.createGain();
-        gain.gain.value = 0.2; // Initial Volume relative to Master
-
-        // Lowpass filter to muffle the harsh sawtooth
-        const filter = ctx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.value = 400;
-
-        // Connections: Mod -> ModGain -> Osc Freq
-        mod.connect(modGain);
-        modGain.connect(osc.frequency);
-
-        // Osc -> Filter -> Gain -> Master
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(masterGainRef.current);
-
-        osc.start();
-        mod.start();
-
-        engineOscRef.current = osc;
-        engineModRef.current = mod;
-        engineGainRef.current = gain;
-    };
-
-    const updateEngine = (speedRatio: number) => {
-        if (!engineOscRef.current || !engineModRef.current || !audioCtxRef.current) return;
-        const ctx = audioCtxRef.current;
-
-        // Base Frequency: 60Hz (Idle) to 300Hz (Max RPM)
-        const targetFreq = 60 + (speedRatio * 240);
-
-        // Rumble Speed: 15Hz (Idle) to 50Hz (Max)
-        const targetRumble = 15 + (speedRatio * 35);
-
-        // Smooth transitions
-        engineOscRef.current.frequency.setTargetAtTime(targetFreq, ctx.currentTime, 0.1);
-        engineModRef.current.frequency.setTargetAtTime(targetRumble, ctx.currentTime, 0.1);
-    };
-
-    const stopEngine = () => {
-        if (engineOscRef.current) {
-            try { engineOscRef.current.stop(); } catch (e) { }
-            engineOscRef.current.disconnect();
-            engineOscRef.current = null;
-        }
-        if (engineModRef.current) {
-            try { engineModRef.current.stop(); } catch (e) { }
-            engineModRef.current.disconnect();
-            engineModRef.current = null;
-        }
-        if (engineGainRef.current) {
-            engineGainRef.current.disconnect();
-            engineGainRef.current = null;
-        }
-    };
-
-    const playSynthSound = (type: 'CRASH' | 'BUMP' | 'EXPLOSION' | 'TIRE' | 'BARREL' | 'REV' | 'GO' | 'VICTORY' | 'DEFEAT') => {
-        const ctx = audioCtxRef.current;
-        if (!ctx || ctx.state !== 'running' || !masterGainRef.current) return;
-
-        const t = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-
-        // Default routing
-        osc.connect(gain);
-        gain.connect(masterGainRef.current);
-
-        if (type === 'CRASH') {
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(100, t);
-            osc.frequency.exponentialRampToValueAtTime(20, t + 0.3);
-            gain.gain.setValueAtTime(0.5, t);
-            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
-            osc.start(t);
-            osc.stop(t + 0.3);
-        } else if (type === 'BUMP') {
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(80, t);
-            osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
-            gain.gain.setValueAtTime(0.3, t);
-            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
-            osc.start(t);
-            osc.stop(t + 0.1);
-        } else if (type === 'EXPLOSION') {
-            // Use Noise Buffer if available for realistic explosion
-            if (noiseBufferRef.current) {
-                const noiseSrc = ctx.createBufferSource();
-                noiseSrc.buffer = noiseBufferRef.current;
-
-                const noiseFilter = ctx.createBiquadFilter();
-                noiseFilter.type = 'lowpass';
-                noiseFilter.frequency.setValueAtTime(1000, t);
-                noiseFilter.frequency.linearRampToValueAtTime(100, t + 1.5);
-
-                const noiseGain = ctx.createGain();
-                noiseGain.gain.setValueAtTime(1.5, t); // Loud
-                noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 1.5);
-
-                noiseSrc.connect(noiseFilter);
-                noiseFilter.connect(noiseGain);
-                noiseGain.connect(masterGainRef.current);
-
-                noiseSrc.start(t);
-            }
-
-            // Add Sub-bass thump via Oscillator
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(50, t);
-            osc.frequency.exponentialRampToValueAtTime(10, t + 1.0);
-            gain.gain.setValueAtTime(1.0, t);
-            gain.gain.exponentialRampToValueAtTime(0.01, t + 1.0);
-            osc.start(t);
-            osc.stop(t + 1.0);
-
-        } else if (type === 'TIRE') {
-            osc.type = 'sawtooth';
-            const filter = ctx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(120, t);
-            osc.disconnect();
-            osc.connect(filter);
-            filter.connect(gain);
-            osc.frequency.setValueAtTime(80, t);
-            osc.frequency.linearRampToValueAtTime(20, t + 0.2);
-            gain.gain.setValueAtTime(0.6, t);
-            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
-            osc.start(t);
-            osc.stop(t + 0.25);
-        } else if (type === 'BARREL') {
-            osc.type = 'square';
-            const filter = ctx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(300, t);
-            filter.Q.value = 15;
-            osc.disconnect();
-            osc.connect(filter);
-            filter.connect(gain);
-            osc.frequency.setValueAtTime(150, t);
-            osc.frequency.exponentialRampToValueAtTime(40, t + 0.4);
-            gain.gain.setValueAtTime(0.5, t);
-            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
-            osc.start(t);
-            osc.stop(t + 0.4);
-        } else if (type === 'REV') {
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(100, t);
-            osc.frequency.linearRampToValueAtTime(300, t + 0.3);
-            const filter = ctx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.value = 400;
-            osc.disconnect();
-            osc.connect(filter);
-            filter.connect(gain);
-            gain.gain.setValueAtTime(0.3, t);
-            gain.gain.linearRampToValueAtTime(0.01, t + 0.4);
-            osc.start(t);
-            osc.stop(t + 0.4);
-        } else if (type === 'GO') {
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(600, t);
-            osc.frequency.linearRampToValueAtTime(800, t + 0.6);
-            gain.gain.setValueAtTime(0.4, t);
-            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.8);
-            osc.start(t);
-            osc.stop(t + 0.8);
-        } else if (type === 'VICTORY') {
-            const freqs = [523.25, 659.25, 783.99, 1046.50];
-            freqs.forEach((f, i) => {
-                const o = ctx.createOscillator();
-                const g = ctx.createGain();
-                o.type = 'triangle';
-                o.frequency.value = f;
-                o.connect(g);
-                g.connect(masterGainRef.current!);
-
-                const start = t + (i * 0.15);
-                g.gain.setValueAtTime(0, start);
-                g.gain.linearRampToValueAtTime(0.3, start + 0.05);
-                g.gain.exponentialRampToValueAtTime(0.01, start + 0.4);
-
-                o.start(start);
-                o.stop(start + 0.5);
-            });
-        } else if (type === 'DEFEAT') {
-            const notes = [138.59, 130.81, 123.47, 110.00];
-
-            notes.forEach((freq, i) => {
-                const o = ctx.createOscillator();
-                const g = ctx.createGain();
-                o.type = 'sawtooth';
-                const f = ctx.createBiquadFilter();
-                f.type = 'lowpass';
-                f.frequency.value = 300;
-
-                o.connect(f);
-                f.connect(g);
-                g.connect(masterGainRef.current!);
-
-                const start = t + (i * 0.4);
-                const duration = i === 3 ? 1.5 : 0.35;
-
-                o.frequency.setValueAtTime(freq, start);
-                if (i === 3) {
-                    o.frequency.linearRampToValueAtTime(freq - 20, start + duration);
-                    const lfo = ctx.createOscillator();
-                    const lfoGain = ctx.createGain();
-                    lfo.frequency.value = 5;
-                    lfoGain.gain.value = 10;
-                    lfo.connect(lfoGain);
-                    lfoGain.connect(o.frequency);
-                    lfo.start(start);
-                    lfo.stop(start + duration);
-                }
-
-                g.gain.setValueAtTime(0, start);
-                g.gain.linearRampToValueAtTime(0.4, start + 0.05);
-                g.gain.linearRampToValueAtTime(0, start + duration);
-
-                o.start(start);
-                o.stop(start + duration);
-            });
-        }
     };
 
     // Initial Setup & Cleanup
@@ -375,15 +91,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
             initAudio();
 
             let count = 3;
-            playSynthSound('REV');
+            playSound('REV');
 
             const interval = setInterval(() => {
                 count--;
                 countdownRef.current = count;
                 if (count > 0) {
-                    playSynthSound('REV');
+                    playSound('REV');
                 } else if (count === 0) {
-                    playSynthSound('GO');
+                    playSound('GO');
                     clearInterval(interval);
                     isRacingRef.current = true;
                     startTimeRef.current = Date.now();
@@ -436,7 +152,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
     // Main Loop
     useEffect(() => {
         if (status !== GameStatus.PLAYING) {
-            if (engineOscRef.current) stopEngine();
+            if (isEngineRunning()) stopEngine();
             return;
         }
         const canvas = canvasRef.current;
@@ -523,7 +239,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                     type: 'FIREWORK'
                 });
             }
-            playSynthSound('BUMP');
+            playSound('BUMP');
         };
 
         const spawnDamageParticles = (x: number, y: number, damage: number, scale: number) => {
@@ -841,11 +557,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                 // --- CRITICAL FIX END ---
 
                 if (isPaused) {
-                    if (engineOscRef.current) stopEngine();
+                    if (isEngineRunning()) stopEngine();
                     frameIdRef.current = requestAnimationFrame(render);
                     return;
                 }
-                if (isRacingRef.current && !engineOscRef.current && !finishingSeqRef.current.active && !carsRef.current[0]?.exploded) {
+                if (isRacingRef.current && !isEngineRunning() && !finishingSeqRef.current.active && !carsRef.current[0]?.exploded) {
                     startEngine();
                 }
 
@@ -874,14 +590,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                     finishingSeqRef.current.startTime = Date.now();
                     stopEngine();
                     if (playerDead) {
-                        playSynthSound('EXPLOSION');
-                        setTimeout(() => playSynthSound('DEFEAT'), 1000);
+                        playSound('EXPLOSION');
+                        setTimeout(() => playSound('DEFEAT'), 1000);
                     } else if (player.finished) {
                         const rank = player.finished && (rival && (!rival.finished || (rival.lapTime > player.lapTime))) ? 1 : 2;
-                        if (rank === 1) playSynthSound('VICTORY');
-                        else playSynthSound('DEFEAT');
+                        if (rank === 1) playSound('VICTORY');
+                        else playSound('DEFEAT');
                     } else {
-                        playSynthSound('DEFEAT');
+                        playSound('DEFEAT');
                     }
                     inputRef.current = { up: false, down: false, left: false, right: false };
                 }
@@ -921,19 +637,19 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                         settings.laps,
                         {
                             onObstacleHit: (type) => {
-                                if (type === 'TREE') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'TREE'); playSynthSound('CRASH'); }
-                                else if (type === 'BOULDER') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'DEBRIS'); playSynthSound('CRASH'); }
-                                else if (type === 'BARREL') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'BARREL'); playSynthSound('BARREL'); }
-                                else if (type === 'TIRE') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'TIRE'); playSynthSound('TIRE'); }
+                                if (type === 'TREE') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'TREE'); playSound('CRASH'); }
+                                else if (type === 'BOULDER') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'DEBRIS'); playSound('CRASH'); }
+                                else if (type === 'BARREL') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'BARREL'); playSound('BARREL'); }
+                                else if (type === 'TIRE') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'TIRE'); playSound('TIRE'); }
                             },
                             onCarHit: (_type, severity) => {
                                 spawnParticles(WIDTH / 2, HEIGHT - 100, 'SPARK');
-                                if (severity > 0.8) playSynthSound('CRASH');
-                                else playSynthSound('BUMP');
+                                if (severity > 0.8) playSound('CRASH');
+                                else playSound('BUMP');
                             }
                         }
                     );
-                    if (engineOscRef.current && !finishingSeqRef.current.active) {
+                    if (isEngineRunning() && !finishingSeqRef.current.active) {
                         updateEngine(cameraCar.speed / cameraCar.maxSpeed);
                     }
                     if (speedRef.current) speedRef.current.innerText = `${Math.floor(cameraCar.speed / 100)}`;
