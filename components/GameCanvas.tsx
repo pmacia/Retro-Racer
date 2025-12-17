@@ -2,7 +2,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { GameStatus, PlayerSettings, Car, Segment, TrackDefinition } from '../types';
 import { createTrack, createCars, updateGame, project } from '../services/gameEngine';
-import { WIDTH, HEIGHT, SEGMENT_LENGTH, ROAD_WIDTH, CAMERA_DEPTH, VISIBILITY, COLORS, DAMAGE } from '../constants';
+import { WIDTH, HEIGHT, SEGMENT_LENGTH, ROAD_WIDTH, CAMERA_DEPTH, VISIBILITY, COLORS } from '../constants';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Gauge, Timer, Flag, Map as MapIcon, Skull, Volume2, VolumeX } from 'lucide-react';
 
 interface GameCanvasProps {
@@ -59,10 +59,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
     const timeRef = useRef<HTMLSpanElement>(null);
     const lapRef = useRef<HTMLSpanElement>(null);
     const damageRef = useRef<HTMLDivElement>(null);
+    const rivalDamageRef = useRef<HTMLDivElement>(null);
 
-    const [countdown, setCountdown] = useState<number>(3);
+    const countdownRef = useRef<number>(3);
     const isRacingRef = useRef<boolean>(false);
     const [viewMode, setViewMode] = useState<'3D' | 'MAP'>('3D');
+    const [activeView, setActiveView] = useState<number>(0); // 0=Player, 1=Rival, 2=Split
     const [isMuted, setIsMuted] = useState<boolean>(false);
 
     // --- AUDIO SYSTEM (Procedural Synth) ---
@@ -365,7 +367,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
             // NOTE: We now use the passed trackDefinition directly
             trackRef.current = createTrack(trackDefinition);
             particlesRef.current = [];
-            setCountdown(3);
+            countdownRef.current = 3;
             isRacingRef.current = false;
             finishingSeqRef.current = { active: false, startTime: 0, resultProcessed: false };
             stopEngine();
@@ -377,7 +379,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
 
             const interval = setInterval(() => {
                 count--;
-                setCountdown(count);
+                countdownRef.current = count;
                 if (count > 0) {
                     playSynthSound('REV');
                 } else if (count === 0) {
@@ -411,9 +413,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
             if (['ArrowDown', 's', 'S'].includes(e.key)) inputRef.current.down = isDown;
 
             if (isDown) {
-                if (e.key === '1' || (e.altKey && e.key === '1')) cameraViewRef.current = 0;
-                if (e.key === '2' || (e.altKey && e.key === '2')) cameraViewRef.current = 1;
-                if (e.key === '3' || (e.altKey && e.key === '3')) cameraViewRef.current = 2; // Split Screen
+                if (e.key === '1' || (e.altKey && e.key === '1')) { cameraViewRef.current = 0; setActiveView(0); }
+                if (e.key === '2' || (e.altKey && e.key === '2')) { cameraViewRef.current = 1; setActiveView(1); }
+                if (e.key === '3' || (e.altKey && e.key === '3')) { cameraViewRef.current = 2; setActiveView(2); } // Split Screen
                 initAudio();
             }
         };
@@ -829,296 +831,322 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
         };
 
         const render = () => {
-            // --- CRITICAL FIX START ---
-            // If data is not yet initialized (Race Condition fix), wait for next frame.
-            if (trackRef.current.length === 0 || carsRef.current.length === 0) {
-                frameIdRef.current = requestAnimationFrame(render);
-                return;
-            }
-            // --- CRITICAL FIX END ---
-
-            if (isPaused) {
-                if (engineOscRef.current) stopEngine();
-                frameIdRef.current = requestAnimationFrame(render);
-                return;
-            }
-            if (isRacingRef.current && !engineOscRef.current && !finishingSeqRef.current.active && !carsRef.current[0]?.exploded) {
-                startEngine();
-            }
-
-            const now = Date.now();
-            const dt = Math.min(1, (now - lastTimeRef.current) / 1000);
-            lastTimeRef.current = now;
-
-            const player = carsRef.current[0];
-            const rival = carsRef.current[1];
-
-            // Determine camera target
-            const cameraTargetIndex = cameraViewRef.current < carsRef.current.length ? cameraViewRef.current : 0;
-            const cameraCar = carsRef.current[cameraTargetIndex];
-
-            const anyCarFinished = carsRef.current.some(c => c.finished);
-            const playerDead = player.exploded;
-            const finishConditionMet = anyCarFinished || playerDead;
-
-            if (finishConditionMet && !finishingSeqRef.current.active) {
-                finishingSeqRef.current.active = true;
-                finishingSeqRef.current.startTime = Date.now();
-                stopEngine();
-                if (playerDead) {
-                    playSynthSound('EXPLOSION');
-                    setTimeout(() => playSynthSound('DEFEAT'), 1000);
-                } else if (player.finished) {
-                    const rank = player.finished && (!rival.finished || (rival.lapTime > player.lapTime)) ? 1 : 2;
-                    if (rank === 1) playSynthSound('VICTORY');
-                    else playSynthSound('DEFEAT');
-                } else {
-                    playSynthSound('DEFEAT');
-                }
-                inputRef.current = { up: false, down: false, left: false, right: false };
-            }
-
-            if (finishingSeqRef.current.active) {
-                const timeSinceFinish = Date.now() - finishingSeqRef.current.startTime;
-                if (player.finished && !playerDead) {
-                    if (Math.random() < 0.05) spawnFireworks();
-                }
-                if (timeSinceFinish > 3500 && !finishingSeqRef.current.resultProcessed) {
-                    finishingSeqRef.current.resultProcessed = true;
-                    const totalTime = (Date.now() - startTimeRef.current) / 1000;
-                    // Use passed track definition for calculations if needed
-                    const totalDistance = trackRef.current.length * SEGMENT_LENGTH * settings.laps;
-                    let rank = 2;
-                    let winnerName = 'CPU';
-                    if (playerDead) {
-                        rank = 2; winnerName = 'CRASHED';
-                    } else if (player.finished) {
-                        if (rival.finished && rival.lapTime < player.lapTime) {
-                            rank = 2; winnerName = rival.name;
-                        } else {
-                            rank = 1; winnerName = player.name;
-                        }
-                    }
-                    onFinish(totalTime, totalDistance, rank, winnerName);
+            try {
+                // --- CRITICAL FIX START ---
+                // If data is not yet initialized (Race Condition fix), wait for next frame.
+                if (trackRef.current.length === 0 || carsRef.current.length === 0) {
+                    frameIdRef.current = requestAnimationFrame(render);
                     return;
                 }
-            }
+                // --- CRITICAL FIX END ---
 
-            if (isRacingRef.current) {
-                updateGame(
-                    carsRef.current,
-                    trackRef.current,
-                    inputRef.current,
-                    dt,
-                    settings.laps,
-                    {
-                        onObstacleHit: (type) => {
-                            if (type === 'TREE') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'TREE'); playSynthSound('CRASH'); }
-                            else if (type === 'BOULDER') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'DEBRIS'); playSynthSound('CRASH'); }
-                            else if (type === 'BARREL') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'BARREL'); playSynthSound('BARREL'); }
-                            else if (type === 'TIRE') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'TIRE'); playSynthSound('TIRE'); }
-                        },
-                        onCarHit: (type, severity) => {
-                            spawnParticles(WIDTH / 2, HEIGHT - 100, 'SPARK');
-                            if (severity > 0.8) playSynthSound('CRASH');
-                            else playSynthSound('BUMP');
+                if (isPaused) {
+                    if (engineOscRef.current) stopEngine();
+                    frameIdRef.current = requestAnimationFrame(render);
+                    return;
+                }
+                if (isRacingRef.current && !engineOscRef.current && !finishingSeqRef.current.active && !carsRef.current[0]?.exploded) {
+                    startEngine();
+                }
+
+                const now = Date.now();
+                const dt = Math.min(1, (now - lastTimeRef.current) / 1000);
+                lastTimeRef.current = now;
+
+                const player = carsRef.current[0];
+                const rival = carsRef.current[1]; // Might be undefined if only 1 car
+
+                // Determine camera target
+                const cameraTargetIndex = cameraViewRef.current < carsRef.current.length ? cameraViewRef.current : 0;
+                const cameraCar = carsRef.current[cameraTargetIndex];
+
+                if (!player || !cameraCar) {
+                    frameIdRef.current = requestAnimationFrame(render);
+                    return;
+                }
+
+                const anyCarFinished = carsRef.current.some(c => c.finished);
+                const playerDead = player.exploded;
+                const finishConditionMet = anyCarFinished || playerDead;
+
+                if (finishConditionMet && !finishingSeqRef.current.active) {
+                    finishingSeqRef.current.active = true;
+                    finishingSeqRef.current.startTime = Date.now();
+                    stopEngine();
+                    if (playerDead) {
+                        playSynthSound('EXPLOSION');
+                        setTimeout(() => playSynthSound('DEFEAT'), 1000);
+                    } else if (player.finished) {
+                        const rank = player.finished && (rival && (!rival.finished || (rival.lapTime > player.lapTime))) ? 1 : 2;
+                        if (rank === 1) playSynthSound('VICTORY');
+                        else playSynthSound('DEFEAT');
+                    } else {
+                        playSynthSound('DEFEAT');
+                    }
+                    inputRef.current = { up: false, down: false, left: false, right: false };
+                }
+
+                if (finishingSeqRef.current.active) {
+                    const timeSinceFinish = Date.now() - finishingSeqRef.current.startTime;
+                    if (player.finished && !playerDead) {
+                        if (Math.random() < 0.05) spawnFireworks();
+                    }
+                    if (timeSinceFinish > 3500 && !finishingSeqRef.current.resultProcessed) {
+                        finishingSeqRef.current.resultProcessed = true;
+                        const totalTime = (Date.now() - startTimeRef.current) / 1000;
+                        // Use passed track definition for calculations if needed
+                        const totalDistance = trackRef.current.length * SEGMENT_LENGTH * settings.laps;
+                        let rank = 2;
+                        let winnerName = 'CPU';
+                        if (playerDead) {
+                            rank = 2; winnerName = 'CRASHED';
+                        } else if (player.finished) {
+                            if (rival && rival.finished && rival.lapTime < player.lapTime) {
+                                rank = 2; winnerName = rival.name;
+                            } else {
+                                rank = 1; winnerName = player.name;
+                            }
                         }
+                        onFinish(totalTime, totalDistance, rank, winnerName);
+                        return;
                     }
-                );
-                if (engineOscRef.current && !finishingSeqRef.current.active) {
-                    updateEngine(cameraCar.speed / cameraCar.maxSpeed);
                 }
-                if (speedRef.current) speedRef.current.innerText = `${Math.floor(cameraCar.speed / 100)}`;
-                if (timeRef.current) {
-                    const t = (Date.now() - startTimeRef.current) / 1000;
-                    timeRef.current.innerText = t.toFixed(2);
-                }
-                if (lapRef.current) lapRef.current.innerText = `${cameraCar.lap}/${settings.laps}`;
-                if (damageRef.current) {
-                    const pct = Math.min(100, cameraCar.damage);
-                    damageRef.current.style.width = `${pct}%`;
-                    if (pct > 90) damageRef.current.style.backgroundColor = '#ef4444';
-                    else if (pct > 50) damageRef.current.style.backgroundColor = '#f97316';
-                    else damageRef.current.style.backgroundColor = '#22c55e';
-                }
-            }
 
-            // Clear Screen
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                if (isRacingRef.current) {
+                    updateGame(
+                        carsRef.current,
+                        trackRef.current,
+                        inputRef.current,
+                        dt,
+                        settings.laps,
+                        {
+                            onObstacleHit: (type) => {
+                                if (type === 'TREE') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'TREE'); playSynthSound('CRASH'); }
+                                else if (type === 'BOULDER') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'DEBRIS'); playSynthSound('CRASH'); }
+                                else if (type === 'BARREL') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'BARREL'); playSynthSound('BARREL'); }
+                                else if (type === 'TIRE') { spawnParticles(WIDTH / 2, HEIGHT - 100, 'TIRE'); playSynthSound('TIRE'); }
+                            },
+                            onCarHit: (_type, severity) => {
+                                spawnParticles(WIDTH / 2, HEIGHT - 100, 'SPARK');
+                                if (severity > 0.8) playSynthSound('CRASH');
+                                else playSynthSound('BUMP');
+                            }
+                        }
+                    );
+                    if (engineOscRef.current && !finishingSeqRef.current.active) {
+                        updateEngine(cameraCar.speed / cameraCar.maxSpeed);
+                    }
+                    if (speedRef.current) speedRef.current.innerText = `${Math.floor(cameraCar.speed / 100)}`;
+                    if (timeRef.current) {
+                        const t = (Date.now() - startTimeRef.current) / 1000;
+                        timeRef.current.innerText = t.toFixed(2);
+                    }
+                    if (lapRef.current) lapRef.current.innerText = `${cameraCar.lap}/${settings.laps}`;
+                    if (damageRef.current) {
+                        const pct = Math.min(100, cameraCar.damage);
+                        damageRef.current.style.width = `${pct}%`;
+                        if (pct > 90) damageRef.current.style.backgroundColor = '#ef4444';
+                        else if (pct > 50) damageRef.current.style.backgroundColor = '#f97316';
+                        else damageRef.current.style.backgroundColor = '#22c55e';
+                    }
+                    if (rivalDamageRef.current && cameraViewRef.current === 2 && rival) {
+                        const pct = Math.min(100, rival.damage);
+                        rivalDamageRef.current.style.width = `${pct}%`;
+                        if (pct > 90) rivalDamageRef.current.style.backgroundColor = '#ef4444';
+                        else if (pct > 50) rivalDamageRef.current.style.backgroundColor = '#f97316';
+                        else rivalDamageRef.current.style.backgroundColor = '#22c55e';
+                    }
+                }
 
-            if (viewMode === 'MAP') {
-                // [MAP RENDERING CODE OMITTED FOR BREVITY - REMAINS THE SAME]
-                // Re-implementing Map for correctness
-                ctx.fillStyle = '#0f172a';
+                // Clear Screen
+                ctx.fillStyle = '#000';
                 ctx.fillRect(0, 0, WIDTH, HEIGHT);
-                ctx.save();
-                let mmMinX = Infinity, mmMaxX = -Infinity, mmMinY = Infinity, mmMaxY = -Infinity;
-                trackRef.current.forEach(s => {
-                    if (s.mapX < mmMinX) mmMinX = s.mapX;
-                    if (s.mapX > mmMaxX) mmMaxX = s.mapX;
-                    if (s.mapY < mmMinY) mmMinY = s.mapY;
-                    if (s.mapY > mmMaxY) mmMaxY = s.mapY;
-                });
-                const mapW = mmMaxX - mmMinX;
-                const mapH = mmMaxY - mmMinY;
-                const scale = Math.min(WIDTH / mapW, HEIGHT / mapH) * 0.8;
-                ctx.translate(WIDTH / 2, HEIGHT / 2);
-                ctx.scale(scale, scale);
-                ctx.translate(-(mmMinX + mapW / 2), -(mmMinY + mapH / 2));
-                ctx.lineWidth = 3;
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.strokeStyle = '#333';
-                ctx.beginPath();
-                ctx.moveTo(trackRef.current[0].mapX, trackRef.current[0].mapY);
-                trackRef.current.forEach(p => ctx.lineTo(p.mapX, p.mapY));
-                ctx.closePath();
-                ctx.stroke();
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = '#666';
-                ctx.stroke();
-                trackRef.current.forEach(seg => {
-                    seg.sprites.forEach(spr => {
-                        const ox = seg.mapX + Math.cos(0) * spr.offset * 2;
-                        const oy = seg.mapY + Math.sin(0) * spr.offset * 2;
-                        ctx.fillStyle = spr.source === 'TREE' ? '#10b981' : '#9ca3af';
-                        ctx.beginPath();
-                        ctx.arc(ox, oy, 0.75, 0, Math.PI * 2);
-                        ctx.fill();
+
+                if (viewMode === 'MAP') {
+                    // [MAP RENDERING CODE OMITTED FOR BREVITY - REMAINS THE SAME]
+                    // Re-implementing Map for correctness
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                    ctx.save();
+                    let mmMinX = Infinity, mmMaxX = -Infinity, mmMinY = Infinity, mmMaxY = -Infinity;
+                    trackRef.current.forEach(s => {
+                        if (s.mapX < mmMinX) mmMinX = s.mapX;
+                        if (s.mapX > mmMaxX) mmMaxX = s.mapX;
+                        if (s.mapY < mmMinY) mmMinY = s.mapY;
+                        if (s.mapY > mmMaxY) mmMaxY = s.mapY;
                     });
-                });
-                carsRef.current.forEach(car => {
-                    const segIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackRef.current.length;
-                    const seg = trackRef.current[segIdx];
-                    const nextSeg = trackRef.current[(segIdx + 5) % trackRef.current.length];
-                    const angle = Math.atan2(nextSeg.mapY - seg.mapY, nextSeg.mapX - seg.mapX);
-                    ctx.save();
-                    ctx.translate(seg.mapX, seg.mapY);
-                    ctx.rotate(angle + Math.PI / 2);
-                    ctx.fillStyle = car.color;
-                    const carW = 1;
-                    const carH = 1.75;
-                    ctx.fillRect(-carW / 2, -carH / 2, carW, carH);
-                    ctx.lineWidth = 0.25;
-                    ctx.strokeStyle = 'white';
-                    ctx.strokeRect(-carW / 2, -carH / 2, carW, carH);
-                    ctx.restore();
-                });
-                ctx.restore();
-            } else {
-                updateParticles();
-
-                if (cameraViewRef.current === 2) {
-                    // Split Screen
-                    renderView(ctx, player, 0, 0, WIDTH / 2, HEIGHT);
-                    renderView(ctx, rival, WIDTH / 2, 0, WIDTH / 2, HEIGHT);
-
-                    // Divider
-                    ctx.fillStyle = '#000';
-                    ctx.fillRect(WIDTH / 2 - 2, 0, 4, HEIGHT);
-                } else {
-                    // Single View
-                    renderView(ctx, cameraCar, 0, 0, WIDTH, HEIGHT);
-                }
-
-                // --- HUD MINI-MAP ---
-                // Only draw if we have track data
-                if (trackRef.current.length > 0) {
-                    const mmSize = 120;
-                    const mmX = 20; // Left aligned
-                    const mmY = 100; // Below the speed gauge (approx)
-
-                    // Calculate scale
-                    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                    for (const s of trackRef.current) {
-                        if (s.mapX < minX) minX = s.mapX;
-                        if (s.mapX > maxX) maxX = s.mapX;
-                        if (s.mapY < minY) minY = s.mapY;
-                        if (s.mapY > maxY) maxY = s.mapY;
-                    }
-                    const w = maxX - minX;
-                    const h = maxY - minY;
-                    const scale = Math.min((mmSize - 10) / w, (mmSize - 10) / h);
-
-                    ctx.save();
-                    ctx.translate(mmX, mmY);
-
-                    // Background
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-                    ctx.strokeStyle = 'rgba(6, 182, 212, 0.3)'; // Cyan tint border
-                    ctx.lineWidth = 1;
+                    const mapW = mmMaxX - mmMinX;
+                    const mapH = mmMaxY - mmMinY;
+                    const scale = Math.min(WIDTH / mapW, HEIGHT / mapH) * 0.8;
+                    ctx.translate(WIDTH / 2, HEIGHT / 2);
+                    ctx.scale(scale, scale);
+                    ctx.translate(-(mmMinX + mapW / 2), -(mmMinY + mapH / 2));
+                    ctx.lineWidth = 3;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.strokeStyle = '#333';
                     ctx.beginPath();
-                    if (typeof (ctx as any).roundRect === 'function') (ctx as any).roundRect(0, 0, mmSize, mmSize, 8);
-                    else ctx.rect(0, 0, mmSize, mmSize);
-                    ctx.fill();
-                    ctx.stroke();
-
-                    // Center track
-                    const offsetX = (mmSize - w * scale) / 2 - minX * scale;
-                    const offsetY = (mmSize - h * scale) / 2 - minY * scale;
-
-                    // Draw Track Line
-                    ctx.beginPath();
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                    ctx.lineWidth = 2;
-                    for (let i = 0; i < trackRef.current.length; i++) {
-                        const s = trackRef.current[i];
-                        const sx = s.mapX * scale + offsetX;
-                        const sy = s.mapY * scale + offsetY;
-                        if (i === 0) ctx.moveTo(sx, sy);
-                        else ctx.lineTo(sx, sy);
-                    }
+                    ctx.moveTo(trackRef.current[0].mapX, trackRef.current[0].mapY);
+                    trackRef.current.forEach(p => ctx.lineTo(p.mapX, p.mapY));
                     ctx.closePath();
                     ctx.stroke();
-
-                    // Draw Cars
-                    for (const car of carsRef.current) {
-                        const seg = trackRef.current[Math.floor(car.z / SEGMENT_LENGTH) % trackRef.current.length];
-                        const cx = seg.mapX * scale + offsetX;
-                        const cy = seg.mapY * scale + offsetY;
-
-                        ctx.fillStyle = car.isPlayer ? '#22c55e' : '#ef4444'; // Green vs Red
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-                        ctx.fill();
-                        // Stroke for visibility
-                        ctx.lineWidth = 1;
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = '#666';
+                    ctx.stroke();
+                    trackRef.current.forEach(seg => {
+                        seg.sprites.forEach(spr => {
+                            const ox = seg.mapX + Math.cos(0) * spr.offset * 2;
+                            const oy = seg.mapY + Math.sin(0) * spr.offset * 2;
+                            ctx.fillStyle = spr.source === 'TREE' ? '#10b981' : '#9ca3af';
+                            ctx.beginPath();
+                            ctx.arc(ox, oy, 0.75, 0, Math.PI * 2);
+                            ctx.fill();
+                        });
+                    });
+                    carsRef.current.forEach(car => {
+                        const segIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackRef.current.length;
+                        const seg = trackRef.current[segIdx];
+                        const nextSeg = trackRef.current[(segIdx + 5) % trackRef.current.length];
+                        const angle = Math.atan2(nextSeg.mapY - seg.mapY, nextSeg.mapX - seg.mapX);
+                        ctx.save();
+                        ctx.translate(seg.mapX, seg.mapY);
+                        ctx.rotate(angle + Math.PI / 2);
+                        ctx.fillStyle = car.color;
+                        const carW = 1;
+                        const carH = 1.75;
+                        ctx.fillRect(-carW / 2, -carH / 2, carW, carH);
+                        ctx.lineWidth = 0.25;
                         ctx.strokeStyle = 'white';
-                        ctx.stroke();
+                        ctx.strokeRect(-carW / 2, -carH / 2, carW, carH);
+                        ctx.restore();
+                    });
+                    ctx.restore();
+                } else {
+                    updateParticles();
+
+                    if (cameraViewRef.current === 2) {
+                        // Split Screen
+                        renderView(ctx, player, 0, 0, WIDTH / 2, HEIGHT);
+                        if (rival) renderView(ctx, rival, WIDTH / 2, 0, WIDTH / 2, HEIGHT);
+
+                        // Divider
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(WIDTH / 2 - 2, 0, 4, HEIGHT);
+                    } else {
+                        // Single View
+                        renderView(ctx, cameraCar, 0, 0, WIDTH, HEIGHT);
                     }
 
-                    ctx.restore();
+                    // --- HUD MINI-MAP ---
+                    // Only draw if we have track data
+                    if (trackRef.current.length > 0) {
+                        const mmSize = 120;
+                        const mmX = 20; // Left aligned
+                        const mmY = 140; // Below the speed gauge (approx)
+
+                        // Calculate scale
+                        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                        for (const s of trackRef.current) {
+                            if (s.mapX < minX) minX = s.mapX;
+                            if (s.mapX > maxX) maxX = s.mapX;
+                            if (s.mapY < minY) minY = s.mapY;
+                            if (s.mapY > maxY) maxY = s.mapY;
+                        }
+                        const w = maxX - minX;
+                        const h = maxY - minY;
+                        const scale = Math.min((mmSize - 10) / w, (mmSize - 10) / h);
+
+                        ctx.save();
+                        ctx.translate(mmX, mmY);
+
+                        // Background
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                        ctx.strokeStyle = 'rgba(6, 182, 212, 0.3)'; // Cyan tint border
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        if (typeof (ctx as any).roundRect === 'function') (ctx as any).roundRect(0, 0, mmSize, mmSize, 8);
+                        else ctx.rect(0, 0, mmSize, mmSize);
+                        ctx.fill();
+                        ctx.stroke();
+
+                        // Center track
+                        const offsetX = (mmSize - w * scale) / 2 - minX * scale;
+                        const offsetY = (mmSize - h * scale) / 2 - minY * scale;
+
+                        // Draw Track Line
+                        ctx.beginPath();
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                        ctx.lineWidth = 2;
+                        for (let i = 0; i < trackRef.current.length; i++) {
+                            const s = trackRef.current[i];
+                            const sx = s.mapX * scale + offsetX;
+                            const sy = s.mapY * scale + offsetY;
+                            if (i === 0) ctx.moveTo(sx, sy);
+                            else ctx.lineTo(sx, sy);
+                        }
+                        ctx.closePath();
+                        ctx.stroke();
+
+                        // Draw Cars
+                        for (const car of carsRef.current) {
+                            if (!car) continue;
+                            const segIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackRef.current.length;
+                            // Safeguard against invalid segment index
+                            if (segIdx < 0 || segIdx >= trackRef.current.length) continue;
+
+                            const seg = trackRef.current[segIdx];
+                            if (!seg) continue;
+
+                            const cx = seg.mapX * scale + offsetX;
+                            const cy = seg.mapY * scale + offsetY;
+
+                            ctx.fillStyle = car.isPlayer ? '#22c55e' : '#ef4444'; // Green vs Red
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+                            ctx.fill();
+                            // Stroke for visibility
+                            ctx.lineWidth = 1;
+                            ctx.strokeStyle = 'white';
+                            ctx.stroke();
+                        }
+
+                        ctx.restore();
+                    }
                 }
+                if (!isRacingRef.current && countdownRef.current > 0) {
+                    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                    ctx.fillStyle = countdownRef.current === 0 ? '#22c55e' : '#eab308';
+                    ctx.font = 'bold 200px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 8;
+                    ctx.strokeText(countdownRef.current.toString(), WIDTH / 2, HEIGHT / 2);
+                    ctx.fillText(countdownRef.current.toString(), WIDTH / 2, HEIGHT / 2);
+                }
+                if (!isRacingRef.current && countdownRef.current === 0) {
+                    ctx.fillStyle = '#22c55e';
+                    ctx.font = 'bold 200px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 8;
+                    ctx.strokeText("YA!", WIDTH / 2, HEIGHT / 2);
+                    ctx.fillText("YA!", WIDTH / 2, HEIGHT / 2);
+                }
+                frameIdRef.current = requestAnimationFrame(render);
+            } catch (e) {
+                console.error("Render Loop Error:", e);
+                // Attempt to recover by requesting next frame, but maybe with a delay or just stop to prevent spam
+                // For now, let's just try to continue, but maybe it's safer to stop if it persists.
+                // frameIdRef.current = requestAnimationFrame(render); 
             }
-            if (!isRacingRef.current && countdown > 0) {
-                ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                ctx.fillRect(0, 0, WIDTH, HEIGHT);
-                ctx.fillStyle = countdown === 0 ? '#22c55e' : '#eab308';
-                ctx.font = 'bold 200px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.strokeStyle = 'white';
-                ctx.lineWidth = 8;
-                ctx.strokeText(countdown.toString(), WIDTH / 2, HEIGHT / 2);
-                ctx.fillText(countdown.toString(), WIDTH / 2, HEIGHT / 2);
-            }
-            if (!isRacingRef.current && countdown === 0) {
-                ctx.fillStyle = '#22c55e';
-                ctx.font = 'bold 200px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.strokeStyle = 'white';
-                ctx.lineWidth = 8;
-                ctx.strokeText("YA!", WIDTH / 2, HEIGHT / 2);
-                ctx.fillText("YA!", WIDTH / 2, HEIGHT / 2);
-            }
-            frameIdRef.current = requestAnimationFrame(render);
         };
 
         frameIdRef.current = requestAnimationFrame(render);
         return () => cancelAnimationFrame(frameIdRef.current);
-    }, [status, isPaused, onFinish, settings.laps, settings.difficulty, settings.trackId, bestSpeed, countdown, viewMode, isMuted, trackDefinition]);
+    }, [status, isPaused, onFinish, settings.laps, settings.difficulty, settings.trackId, bestSpeed, viewMode, isMuted, trackDefinition]);
 
     return (
         <div className="relative w-full h-full touch-none select-none overflow-hidden">
@@ -1141,13 +1169,36 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                             <span ref={timeRef} className="font-mono text-xl md:text-3xl font-bold text-yellow-400 tracking-wider text-center">0.00</span>
                         </div>
 
-                        <div className="w-24 md:w-48 h-2 md:h-4 bg-gray-900 rounded-full border border-gray-600 relative overflow-hidden mt-1 shadow-lg">
-                            <div className="absolute inset-0 flex items-center justify-center z-10 hidden md:flex">
-                                <Skull size={10} className="text-white/50 mr-1" />
-                                <span className="text-[9px] font-bold text-white/70 uppercase tracking-widest">DAMAGE</span>
+                        {activeView === 2 ? (
+                            <div className="w-full flex mt-1">
+                                <div className="w-1/2 mr-10 flex justify-center">
+                                    <div className="w-24 md:w-48 h-2 md:h-4 bg-gray-900 rounded-full border border-gray-600 relative overflow-hidden shadow-lg">
+                                        <div className="absolute inset-0 flex items-center justify-center z-10 hidden md:flex">
+                                            <Skull size={10} className="text-white/50 mr-1" />
+                                            <span className="text-[9px] font-bold text-white/70 uppercase tracking-widest">P1 DMG</span>
+                                        </div>
+                                        <div ref={damageRef} className="h-full bg-green-500 transition-all duration-300 w-0"></div>
+                                    </div>
+                                </div>
+                                <div className="w-1/2 flex justify-center">
+                                    <div className="w-24 md:w-48 h-2 md:h-4 bg-gray-900 rounded-full border border-gray-600 relative overflow-hidden shadow-lg">
+                                        <div className="absolute inset-0 flex items-center justify-center z-10 hidden md:flex">
+                                            <Skull size={10} className="text-white/50 mr-1" />
+                                            <span className="text-[9px] font-bold text-white/70 uppercase tracking-widest">CPU DMG</span>
+                                        </div>
+                                        <div ref={rivalDamageRef} className="h-full bg-green-500 transition-all duration-300 w-0"></div>
+                                    </div>
+                                </div>
                             </div>
-                            <div ref={damageRef} className="h-full bg-green-500 transition-all duration-300 w-0"></div>
-                        </div>
+                        ) : (
+                            <div className="w-24 md:w-48 h-2 md:h-4 bg-gray-900 rounded-full border border-gray-600 relative overflow-hidden mt-1 shadow-lg">
+                                <div className="absolute inset-0 flex items-center justify-center z-10 hidden md:flex">
+                                    <Skull size={10} className="text-white/50 mr-1" />
+                                    <span className="text-[9px] font-bold text-white/70 uppercase tracking-widest">DAMAGE</span>
+                                </div>
+                                <div ref={damageRef} className="h-full bg-green-500 transition-all duration-300 w-0"></div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex flex-col items-end gap-1 md:gap-2 pointer-events-auto">
