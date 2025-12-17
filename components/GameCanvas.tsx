@@ -413,6 +413,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
             if (isDown) {
                 if (e.key === '1' || (e.altKey && e.key === '1')) cameraViewRef.current = 0;
                 if (e.key === '2' || (e.altKey && e.key === '2')) cameraViewRef.current = 1;
+                if (e.key === '3' || (e.altKey && e.key === '3')) cameraViewRef.current = 2; // Split Screen
                 initAudio();
             }
         };
@@ -449,21 +450,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
             c.lineTo(x2, y2);
             c.lineTo(x3, y3);
             c.lineTo(x4, y4);
-            c.closePath();
-            c.fill();
-        };
-
-        const drawMountains = (c: CanvasRenderingContext2D) => {
-            const h = HEIGHT / 2;
-            c.fillStyle = COLORS.MOUNTAIN;
-            c.beginPath();
-            c.moveTo(0, h);
-            for (let i = 0; i <= WIDTH; i += 20) {
-                const seed = i * 0.05;
-                const peakHeight = Math.sin(seed) * 10 + Math.cos(seed * 2.5) * 5 + 15;
-                c.lineTo(i, h - peakHeight);
-            }
-            c.lineTo(WIDTH, h);
             c.closePath();
             c.fill();
         };
@@ -592,7 +578,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
             }
         };
 
-        const updateAndDrawParticles = (ctx: CanvasRenderingContext2D) => {
+        const updateParticles = () => {
             for (let i = particlesRef.current.length - 1; i >= 0; i--) {
                 const p = particlesRef.current[i];
                 p.x += p.vx;
@@ -608,8 +594,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                 }
                 if (p.life <= 0) {
                     particlesRef.current.splice(i, 1);
-                    continue;
                 }
+            }
+        };
+
+        const drawParticles = (ctx: CanvasRenderingContext2D) => {
+            for (let i = 0; i < particlesRef.current.length; i++) {
+                const p = particlesRef.current[i];
                 ctx.beginPath();
                 if (p.type === 'DEBRIS' || p.type === 'LEAF') ctx.rect(p.x, p.y, p.size, p.size);
                 else if (p.type === 'SPARK') {
@@ -626,6 +617,215 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                 else ctx.fillStyle = `${p.color}${p.life * 0.8})`;
                 ctx.fill();
             }
+        };
+
+        const renderView = (ctx: CanvasRenderingContext2D, cameraCar: Car, viewX: number, viewY: number, viewW: number, viewH: number) => {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(viewX, viewY, viewW, viewH);
+            ctx.clip();
+
+            ctx.fillStyle = COLORS.SKY;
+            ctx.fillRect(viewX, viewY, viewW, viewH);
+
+            const h = viewH / 2;
+            ctx.fillStyle = COLORS.MOUNTAIN;
+            ctx.beginPath();
+            ctx.moveTo(viewX, viewY + h);
+            for (let i = 0; i <= viewW; i += 20) {
+                const seed = (i + viewX) * 0.05;
+                const peakHeight = Math.sin(seed) * 10 + Math.cos(seed * 2.5) * 5 + 15;
+                ctx.lineTo(viewX + i, viewY + h - peakHeight);
+            }
+            ctx.lineTo(viewX + viewW, viewY + h);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = COLORS.LIGHT.grass;
+            ctx.fillRect(viewX, viewY + viewH / 2, viewW, viewH / 2);
+
+            const trackLen = trackRef.current.length;
+            const cameraX = cameraCar.offset * ROAD_WIDTH;
+            const cameraY = 1500;
+            const cameraZ = cameraCar.z;
+            const baseSegmentIndex = Math.floor(cameraZ / SEGMENT_LENGTH) % trackLen;
+            const baseSegment = trackRef.current[baseSegmentIndex];
+            const basePercent = (cameraZ % SEGMENT_LENGTH) / SEGMENT_LENGTH;
+            let maxY = viewY + viewH;
+            let x = 0;
+            let dx = -(baseSegment.curve * basePercent);
+
+            for (let n = 0; n < VISIBILITY; n++) {
+                const i = (baseSegmentIndex + n) % trackLen;
+                const segment = trackRef.current[i];
+                const loopZ = (i < baseSegmentIndex) ? trackLen * SEGMENT_LENGTH : 0;
+                const segmentZ = (segment.index * SEGMENT_LENGTH + loopZ) - cameraZ;
+                segment.clip = maxY;
+
+                const p1 = project({ x: x - cameraX, y: 0, z: segmentZ }, 0, cameraY, 0, CAMERA_DEPTH, viewW, viewH, ROAD_WIDTH);
+                const p2 = project({ x: x + dx - cameraX, y: 0, z: segmentZ + SEGMENT_LENGTH }, 0, cameraY, 0, CAMERA_DEPTH, viewW, viewH, ROAD_WIDTH);
+
+                p1.x += viewX;
+                p2.x += viewX;
+                p1.y += viewY;
+                p2.y += viewY;
+
+                x += dx;
+                dx += segment.curve;
+                segment.screen = { x: p1.x, y: p1.y, w: p1.w };
+
+                if (p2.y >= maxY || p2.y >= p1.y) continue;
+
+                drawPoly(ctx, p1.x - p1.w, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x - p2.w, p2.y, segment.color.road);
+                const r1 = p1.w * 1.2;
+                const r2 = p2.w * 1.2;
+                drawPoly(ctx, p1.x - r1, p1.y, p1.x - p1.w, p1.y, p2.x - p2.w, p2.y, p2.x - r2, p2.y, segment.color.rumble);
+                drawPoly(ctx, p1.x + p1.w, p1.y, p1.x + r1, p1.y, p2.x + r2, p2.y, p2.x + p2.w, p2.y, segment.color.rumble);
+                if (segment.color.lane) {
+                    const l1 = p1.w * 0.05;
+                    const l2 = p2.w * 0.05;
+                    drawPoly(ctx, p1.x - l1, p1.y, p1.x + l1, p1.y, p2.x + l2, p2.y, p2.x - l2, p2.y, segment.color.lane);
+                }
+                maxY = p2.y;
+            }
+
+            if (maxY > viewY + viewH / 2) {
+                const lastSegIdx = (baseSegmentIndex + VISIBILITY) % trackLen;
+                ctx.fillStyle = trackRef.current[lastSegIdx].color.road;
+                ctx.fillRect(viewX, viewY + viewH / 2, viewW, maxY - (viewY + viewH / 2));
+            }
+
+            for (let n = VISIBILITY - 1; n >= 0; n--) {
+                const i = (baseSegmentIndex + n) % trackLen;
+                const segment = trackRef.current[i];
+                if (!segment.screen) continue;
+
+                segment.sprites.forEach(sprite => {
+                    const scale = segment.screen!.w / (ROAD_WIDTH / 2);
+                    const spriteX = segment.screen!.x + (sprite.offset * segment.screen!.w);
+                    const spriteY = segment.screen!.y;
+                    const sW = sprite.width * scale;
+                    const sH = sprite.height * scale;
+
+                    if (spriteX + sW / 2 < viewX || spriteX - sW / 2 > viewX + viewW) return;
+
+                    if (sprite.source === 'TREE') {
+                        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                        ctx.beginPath();
+                        ctx.ellipse(spriteX, spriteY, sW * 0.4, sW * 0.1, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        const trunkW = sW * 0.2;
+                        const trunkH = sH * 0.2;
+                        ctx.fillStyle = '#4A3728';
+                        ctx.fillRect(spriteX - trunkW / 2, spriteY - trunkH, trunkW, trunkH);
+                        const drawLayer = (y: number, w: number, h: number, color: string) => {
+                            ctx.fillStyle = color;
+                            ctx.beginPath();
+                            ctx.moveTo(spriteX - w / 2, y);
+                            ctx.lineTo(spriteX, y - h);
+                            ctx.lineTo(spriteX + w / 2, y);
+                            ctx.closePath();
+                            ctx.fill();
+                        };
+                        const startY = spriteY - trunkH * 0.8;
+                        drawLayer(startY, sW, sH * 0.35, '#0d4013');
+                        drawLayer(startY - sH * 0.25, sW * 0.8, sH * 0.35, '#14521b');
+                        drawLayer(startY - sH * 0.5, sW * 0.6, sH * 0.35, '#1a6622');
+                    } else if (sprite.source === 'BOULDER') {
+                        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                        ctx.beginPath();
+                        ctx.ellipse(spriteX, spriteY, sW * 0.55, sW * 0.15, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.fillStyle = '#666';
+                        ctx.beginPath();
+                        ctx.moveTo(spriteX - sW * 0.45, spriteY);
+                        ctx.quadraticCurveTo(spriteX, spriteY - sH * 1.2, spriteX + sW * 0.45, spriteY);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.fillStyle = '#888';
+                        ctx.beginPath();
+                        ctx.ellipse(spriteX - sW * 0.15, spriteY - sH * 0.5, sW * 0.15, sH * 0.1, Math.PI / 4, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else if (sprite.source === 'BARREL') {
+                        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                        ctx.beginPath();
+                        ctx.ellipse(spriteX, spriteY, sW * 0.3, sW * 0.1, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        const barrelW = sW * 0.5;
+                        const barrelH = sH * 0.7;
+                        ctx.fillStyle = '#b91c1c';
+                        ctx.fillRect(spriteX - barrelW / 2, spriteY - barrelH, barrelW, barrelH);
+                        ctx.fillStyle = '#7f1d1d';
+                        ctx.fillRect(spriteX - barrelW / 2, spriteY - barrelH * 0.7, barrelW, barrelH * 0.1);
+                        ctx.fillRect(spriteX - barrelW / 2, spriteY - barrelH * 0.3, barrelW, barrelH * 0.1);
+                    } else if (sprite.source === 'TIRE') {
+                        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                        ctx.beginPath();
+                        ctx.ellipse(spriteX, spriteY, sW * 0.3, sW * 0.1, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        const tireW = sW * 0.5;
+                        const tireH = sH * 0.5;
+                        ctx.fillStyle = '#111';
+                        ctx.beginPath();
+                        ctx.ellipse(spriteX, spriteY - tireH / 2, tireW / 2, tireH / 2, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.fillStyle = '#333';
+                        ctx.beginPath();
+                        ctx.ellipse(spriteX, spriteY - tireH / 2, tireW / 4, tireH / 4, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                });
+
+                carsRef.current.forEach(car => {
+                    if (car === cameraCar) return;
+                    const carSegIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackLen;
+                    if (carSegIdx === i) {
+                        const scale = segment.screen!.w / (ROAD_WIDTH / 2);
+                        const carX = segment.screen!.x + (car.offset * segment.screen!.w);
+                        const carY = segment.screen!.y;
+                        const cW = 400 * scale;
+                        const cH = cW * 0.45;
+
+                        if (carX + cW / 2 < viewX || carX - cW / 2 > viewX + viewW) return;
+
+                        drawCar(ctx, carX, carY, cW, cH, car.color);
+                        spawnDamageParticles(carX, carY, car.damage, scale);
+                    }
+                });
+            }
+
+            const playerScreenY = viewY + viewH - 80;
+            const playerW = 340;
+            const playerH = 140;
+            let pY = playerScreenY;
+            if (cameraCar.exploded) pY += (Math.random() - 0.5) * 5;
+            else {
+                const bounce = (2 * Math.random() * (cameraCar.speed / cameraCar.maxSpeed) * viewH / 480) * (Math.random() > 0.5 ? 1 : -1);
+                pY += (isRacingRef.current ? bounce : 0);
+            }
+            const carColor = cameraCar.exploded ? '#2d2d2d' : cameraCar.color;
+            drawCar(ctx, viewX + viewW / 2, pY, playerW, playerH, carColor);
+
+            if (cameraCar.exploded) {
+                spawnDamageParticles(viewX + viewW / 2, pY - 20, 100, 1.5);
+                if (Math.random() > 0.3) {
+                    particlesRef.current.push({
+                        x: viewX + viewW / 2 + (Math.random() * 40 - 20),
+                        y: pY - 30,
+                        vx: (Math.random() * 2 - 1),
+                        vy: -(Math.random() * 5 + 3),
+                        life: 1.5,
+                        size: Math.random() * 20 + 10,
+                        color: 'rgba(20,20,20,',
+                        type: 'SMOKE'
+                    });
+                }
+            } else {
+                spawnDamageParticles(viewX + viewW / 2, pY - 20, cameraCar.damage, 1.0);
+            }
+
+            drawParticles(ctx);
+            ctx.restore();
         };
 
         const render = () => {
@@ -743,11 +943,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                 }
             }
 
-            ctx.fillStyle = COLORS.SKY;
+            // Clear Screen
+            ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, WIDTH, HEIGHT);
-            drawMountains(ctx);
-            ctx.fillStyle = COLORS.LIGHT.grass;
-            ctx.fillRect(0, HEIGHT / 2, WIDTH, HEIGHT / 2);
 
             if (viewMode === 'MAP') {
                 // [MAP RENDERING CODE OMITTED FOR BREVITY - REMAINS THE SAME]
@@ -809,165 +1007,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                 });
                 ctx.restore();
             } else {
-                const trackLen = trackRef.current.length;
-                const cameraX = cameraCar.offset * ROAD_WIDTH;
-                const cameraY = 1500;
-                const cameraZ = cameraCar.z;
-                const baseSegmentIndex = Math.floor(cameraZ / SEGMENT_LENGTH) % trackLen;
-                const baseSegment = trackRef.current[baseSegmentIndex];
-                const basePercent = (cameraZ % SEGMENT_LENGTH) / SEGMENT_LENGTH;
-                let maxY = HEIGHT;
-                let x = 0;
-                let dx = -(baseSegment.curve * basePercent);
+                updateParticles();
 
-                for (let n = 0; n < VISIBILITY; n++) {
-                    const i = (baseSegmentIndex + n) % trackLen;
-                    const segment = trackRef.current[i];
-                    const loopZ = (i < baseSegmentIndex) ? trackLen * SEGMENT_LENGTH : 0;
-                    const segmentZ = (segment.index * SEGMENT_LENGTH + loopZ) - cameraZ;
-                    segment.clip = maxY;
-                    const p1 = project({ x: x - cameraX, y: 0, z: segmentZ }, 0, cameraY, 0, CAMERA_DEPTH, WIDTH, HEIGHT, ROAD_WIDTH);
-                    const p2 = project({ x: x + dx - cameraX, y: 0, z: segmentZ + SEGMENT_LENGTH }, 0, cameraY, 0, CAMERA_DEPTH, WIDTH, HEIGHT, ROAD_WIDTH);
-                    x += dx;
-                    dx += segment.curve;
-                    segment.screen = { x: p1.x, y: p1.y, w: p1.w };
-                    if (p2.y >= maxY || p2.y >= p1.y) continue;
-                    drawPoly(ctx, p1.x - p1.w, p1.y, p1.x + p1.w, p1.y, p2.x + p2.w, p2.y, p2.x - p2.w, p2.y, segment.color.road);
-                    const r1 = p1.w * 1.2;
-                    const r2 = p2.w * 1.2;
-                    drawPoly(ctx, p1.x - r1, p1.y, p1.x - p1.w, p1.y, p2.x - p2.w, p2.y, p2.x - r2, p2.y, segment.color.rumble);
-                    drawPoly(ctx, p1.x + p1.w, p1.y, p1.x + r1, p1.y, p2.x + r2, p2.y, p2.x + p2.w, p2.y, segment.color.rumble);
-                    if (segment.color.lane) {
-                        const l1 = p1.w * 0.05;
-                        const l2 = p2.w * 0.05;
-                        drawPoly(ctx, p1.x - l1, p1.y, p1.x + l1, p1.y, p2.x + l2, p2.y, p2.x - l2, p2.y, segment.color.lane);
-                    }
-                    maxY = p2.y;
-                }
-                if (maxY > HEIGHT / 2) {
-                    const lastSegIdx = (baseSegmentIndex + VISIBILITY) % trackLen;
-                    ctx.fillStyle = trackRef.current[lastSegIdx].color.road;
-                    ctx.fillRect(0, HEIGHT / 2, WIDTH, maxY - HEIGHT / 2);
-                }
-                for (let n = VISIBILITY - 1; n >= 0; n--) {
-                    const i = (baseSegmentIndex + n) % trackLen;
-                    const segment = trackRef.current[i];
-                    if (!segment.screen) continue;
-                    segment.sprites.forEach(sprite => {
-                        const scale = segment.screen!.w / (ROAD_WIDTH / 2);
-                        const spriteX = segment.screen!.x + (sprite.offset * segment.screen!.w);
-                        const spriteY = segment.screen!.y;
-                        const sW = sprite.width * scale;
-                        const sH = sprite.height * scale;
-                        if (sprite.source === 'TREE') {
-                            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                            ctx.beginPath();
-                            ctx.ellipse(spriteX, spriteY, sW * 0.4, sW * 0.1, 0, 0, Math.PI * 2);
-                            ctx.fill();
-                            const trunkW = sW * 0.2;
-                            const trunkH = sH * 0.2;
-                            ctx.fillStyle = '#4A3728';
-                            ctx.fillRect(spriteX - trunkW / 2, spriteY - trunkH, trunkW, trunkH);
-                            const drawLayer = (y: number, w: number, h: number, color: string) => {
-                                ctx.fillStyle = color;
-                                ctx.beginPath();
-                                ctx.moveTo(spriteX - w / 2, y);
-                                ctx.lineTo(spriteX, y - h);
-                                ctx.lineTo(spriteX + w / 2, y);
-                                ctx.closePath();
-                                ctx.fill();
-                            };
-                            const startY = spriteY - trunkH * 0.8;
-                            drawLayer(startY, sW, sH * 0.35, '#0d4013');
-                            drawLayer(startY - sH * 0.25, sW * 0.8, sH * 0.35, '#14521b');
-                            drawLayer(startY - sH * 0.5, sW * 0.6, sH * 0.35, '#1a6622');
-                        } else if (sprite.source === 'BOULDER') {
-                            ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                            ctx.beginPath();
-                            ctx.ellipse(spriteX, spriteY, sW * 0.55, sW * 0.15, 0, 0, Math.PI * 2);
-                            ctx.fill();
-                            ctx.fillStyle = '#666';
-                            ctx.beginPath();
-                            ctx.moveTo(spriteX - sW * 0.45, spriteY);
-                            ctx.quadraticCurveTo(spriteX, spriteY - sH * 1.2, spriteX + sW * 0.45, spriteY);
-                            ctx.closePath();
-                            ctx.fill();
-                            ctx.fillStyle = '#888';
-                            ctx.beginPath();
-                            ctx.ellipse(spriteX - sW * 0.15, spriteY - sH * 0.5, sW * 0.15, sH * 0.1, Math.PI / 4, 0, Math.PI * 2);
-                            ctx.fill();
-                        } else if (sprite.source === 'BARREL') {
-                            ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                            ctx.beginPath();
-                            ctx.ellipse(spriteX, spriteY, sW * 0.3, sW * 0.1, 0, 0, Math.PI * 2);
-                            ctx.fill();
-                            const barrelW = sW * 0.5;
-                            const barrelH = sH * 0.7;
-                            ctx.fillStyle = '#b91c1c';
-                            ctx.fillRect(spriteX - barrelW / 2, spriteY - barrelH, barrelW, barrelH);
-                            ctx.fillStyle = '#7f1d1d';
-                            ctx.fillRect(spriteX - barrelW / 2, spriteY - barrelH * 0.7, barrelW, barrelH * 0.1);
-                            ctx.fillRect(spriteX - barrelW / 2, spriteY - barrelH * 0.3, barrelW, barrelH * 0.1);
-                        } else if (sprite.source === 'TIRE') {
-                            ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                            ctx.beginPath();
-                            ctx.ellipse(spriteX, spriteY, sW * 0.3, sW * 0.1, 0, 0, Math.PI * 2);
-                            ctx.fill();
-                            const tireW = sW * 0.5;
-                            const tireH = sH * 0.5;
-                            ctx.fillStyle = '#111';
-                            ctx.beginPath();
-                            ctx.ellipse(spriteX, spriteY - tireH / 2, tireW / 2, tireH / 2, 0, 0, Math.PI * 2);
-                            ctx.fill();
-                            ctx.fillStyle = '#333';
-                            ctx.beginPath();
-                            ctx.ellipse(spriteX, spriteY - tireH / 2, tireW / 4, tireH / 4, 0, 0, Math.PI * 2);
-                            ctx.fill();
-                        }
-                    });
-                    carsRef.current.forEach(car => {
-                        if (car === cameraCar) return;
-                        const carSegIdx = Math.floor(car.z / SEGMENT_LENGTH) % trackLen;
-                        if (carSegIdx === i) {
-                            const scale = segment.screen!.w / (ROAD_WIDTH / 2);
-                            const carX = segment.screen!.x + (car.offset * segment.screen!.w);
-                            const carY = segment.screen!.y;
-                            const cW = 400 * scale;
-                            const cH = cW * 0.45;
-                            drawCar(ctx, carX, carY, cW, cH, car.color);
-                            spawnDamageParticles(carX, carY, car.damage, scale);
-                        }
-                    });
-                }
-                const playerScreenY = HEIGHT - 80;
-                const playerW = 340;
-                const playerH = 140;
-                let pY = playerScreenY;
-                if (cameraCar.exploded) pY += (Math.random() - 0.5) * 5;
-                else {
-                    const bounce = (2 * Math.random() * (cameraCar.speed / cameraCar.maxSpeed) * HEIGHT / 480) * (Math.random() > 0.5 ? 1 : -1);
-                    pY += (isRacingRef.current ? bounce : 0);
-                }
-                const carColor = cameraCar.exploded ? '#2d2d2d' : cameraCar.color;
-                drawCar(ctx, WIDTH / 2, pY, playerW, playerH, carColor);
-                if (cameraCar.exploded) {
-                    spawnDamageParticles(WIDTH / 2, pY - 20, 100, 1.5);
-                    if (Math.random() > 0.3) {
-                        particlesRef.current.push({
-                            x: WIDTH / 2 + (Math.random() * 40 - 20),
-                            y: pY - 30,
-                            vx: (Math.random() * 2 - 1),
-                            vy: -(Math.random() * 5 + 3),
-                            life: 1.5,
-                            size: Math.random() * 20 + 10,
-                            color: 'rgba(20,20,20,',
-                            type: 'SMOKE'
-                        });
-                    }
+                if (cameraViewRef.current === 2) {
+                    // Split Screen
+                    renderView(ctx, player, 0, 0, WIDTH / 2, HEIGHT);
+                    renderView(ctx, rival, WIDTH / 2, 0, WIDTH / 2, HEIGHT);
+
+                    // Divider
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(WIDTH / 2 - 2, 0, 4, HEIGHT);
                 } else {
-                    spawnDamageParticles(WIDTH / 2, pY - 20, cameraCar.damage, 1.0);
+                    // Single View
+                    renderView(ctx, cameraCar, 0, 0, WIDTH, HEIGHT);
                 }
-                updateAndDrawParticles(ctx);
 
                 // --- HUD MINI-MAP ---
                 // Only draw if we have track data
