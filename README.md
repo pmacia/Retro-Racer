@@ -170,9 +170,10 @@ Para más detalles sobre la organización de los archivos y la arquitectura del 
 _Todos aquellos que ayudaron a levantar el proyecto desde sus inicios:_
 
 * **Paco Maciá** - _Trabajo Inicial_ - [pmacia](https://github.com/pmacia)
-// * **Fulanito Detal** - _Documentación_ - [fulanitodetal](#fulanito-de-tal)
 
-// También puedes mirar la lista de todos los [contribuyentes](https://github.com/your/project/contributors) quiénes han participado en este proyecto.
+<!-- * **Fulanito Detal** - _Documentación_ - [fulanitodetal](#fulanito-de-tal)
+
+También puedes mirar la lista de todos los [contribuyentes](https://github.com/your/project/contributors) quiénes han participado en este proyecto. -->
 
 ---
 
