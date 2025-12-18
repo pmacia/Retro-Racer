@@ -6,6 +6,8 @@
 
 **Retro Racer 2.5D** es un juego de carreras de estilo pseudo-3D construido con **React 19**, **TypeScript** y **HTML5 Canvas**. Cuenta con un motor de física personalizado, generación procedural de pistas, audio sintetizado en tiempo real y una estética Synthwave inmersiva.
 
+Para una visión profunda de cómo está construido el juego, consulta el documento de [Arquitectura Detallada](ARCHITECTURE.md).
+
 ---
 
 ## ✨ Características Principales
@@ -114,6 +116,7 @@ El motor de audio utiliza osciladores (`OscillatorNode`) y ganancia (`GainNode`)
 ---
 
 ## 📂 Estructura del Proyecto
+Para más detalles sobre la organización de los archivos y la arquitectura del sistema, consulta [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```
 /src
