@@ -6,6 +6,8 @@
 
 **Retro Racer 2.5D** es un juego de carreras de estilo pseudo-3D construido con **React 19**, **TypeScript** y **HTML5 Canvas**. Cuenta con un motor de física personalizado, generación procedural de pistas, audio sintetizado en tiempo real y una estética Synthwave inmersiva.
 
+Para una visión profunda de cómo está construido el juego, consulta el documento de [Arquitectura Detallada](ARCHITECTURE.md).
+
 ---
 
 ## ✨ Características Principales
@@ -81,8 +83,13 @@ Compite contra la IA, completa el número de vueltas seleccionado y cruza la met
 *   **KM/H**: Velocidad actual.
 *   **TIMER**: Tiempo transcurrido.
 *   **BARRA DE DAÑO**: Ubicada bajo el tiempo. Verde = OK, Rojo = Peligro crítico.
+    *   En **Pantalla Dividida** (tecla `3`): Se muestran dos barras de daño, una para el jugador (izquierda) y otra para el rival (derecha).
 *   **LAP**: Vuelta actual / Total.
 *   **MINIMAPA**: Muestra la posición de los corredores y obstáculos en tiempo real.
+*   **VISTAS DE CÁMARA**:
+    *   **Vista Jugador** (tecla `1`): Sigue tu coche.
+    *   **Vista Rival** (tecla `2`): Sigue al rival de la IA.
+    *   **Pantalla Dividida** (tecla `3`): Muestra ambos coches simultáneamente.
 
 ---
 
@@ -109,13 +116,26 @@ El motor de audio utiliza osciladores (`OscillatorNode`) y ganancia (`GainNode`)
 ---
 
 ## 📂 Estructura del Proyecto
+Para más detalles sobre la organización de los archivos y la arquitectura del sistema, consulta [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```
 /src
   ├── /components
-  │     └── GameCanvas.tsx    # Núcleo del renderizado y bucle principal
+  │     └── GameCanvas.tsx    # Capa de integración React y bucle principal
   ├── /services
-  │     ├── gameEngine.ts     # Lógica física, IA y colisiones (Backend lógico)
+  │     ├── /audio
+  │     │     ├── audioEngine.ts    # Sistema de audio Web Audio API
+  │     │     └── soundEffects.ts   # Efectos de sonido procedurales
+  │     ├── /input
+  │     │     └── inputManager.ts   # Gestión de entrada (teclado/táctil)
+  │     ├── /rendering
+  │     │     ├── drawCar.ts        # Renderizado de coches
+  │     │     ├── drawTrack.ts      # Renderizado de pista con perspectiva
+  │     │     ├── drawEnvironment.ts # Cielo, césped, montañas
+  │     │     ├── drawObstacles.ts  # Sprites (árboles, barriles, etc.)
+  │     │     ├── drawParticles.ts  # Sistema de partículas
+  │     │     └── drawUI.ts         # Mini-mapa y cuenta atrás
+  │     ├── gameEngine.ts     # Lógica física, IA y colisiones
   │     ├── trackService.ts   # Definiciones de circuitos y generador aleatorio
   │     └── storageService.ts # Gestión de LocalStorage para récords
   ├── /types
@@ -139,7 +159,9 @@ El motor de audio utiliza osciladores (`OscillatorNode`) y ganancia (`GainNode`)
 *   [ ] Ciclo Día/Noche dinámico.
 *   [ ] Clima (Lluvia que reduce el agarre).
 *   [ ] Más tipos de vehículos seleccionables con diferentes estadísticas.
-*   [ ] Modo Multijugador local (Pantalla dividida).
+*   [x] ~~Modo Multijugador local (Pantalla dividida)~~ - **¡Implementado!**
+*   [ ] Sistema de replays para ver las mejores carreras.
+*   [ ] Modo contrareloj con fantasmas.
 
 ---
 
@@ -148,9 +170,10 @@ El motor de audio utiliza osciladores (`OscillatorNode`) y ganancia (`GainNode`)
 _Todos aquellos que ayudaron a levantar el proyecto desde sus inicios:_
 
 * **Paco Maciá** - _Trabajo Inicial_ - [pmacia](https://github.com/pmacia)
-// * **Fulanito Detal** - _Documentación_ - [fulanitodetal](#fulanito-de-tal)
 
-// También puedes mirar la lista de todos los [contribuyentes](https://github.com/your/project/contributors) quiénes han participado en este proyecto.
+<!-- * **Fulanito Detal** - _Documentación_ - [fulanitodetal](#fulanito-de-tal)
+
+También puedes mirar la lista de todos los [contribuyentes](https://github.com/your/project/contributors) quiénes han participado en este proyecto. -->
 
 ---
 
