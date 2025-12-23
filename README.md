@@ -16,7 +16,8 @@ Para una visión profunda de cómo está construido el juego, consulta el docume
 *   **Motor Pseudo-3D (2.5D)**: Utiliza proyección de perspectiva clásica para simular profundidad y velocidad.
 *   **Física Avanzada**: Implementación de inercia, fuerza centrífuga, "deriva geométrica" (tangente en curvas) y agarre dinámico según la velocidad.
 *   **Sistema de Daños**: Colisiones detalladas. Los coches sufren daños visuales y pueden explotar si se abusa de ellos.
-*   **IA Competitiva**: Rivales con diferentes niveles de dificultad (Rookie, Pro, Elite) que trazan curvas, adelantan y evitan colisiones.
+*   **Manchas de Aceite**: Efecto visual acumulativo en el parabrisas que dificulta la visión y se limpia con el tiempo o al terminar la carrera.
+*   **IA Competitiva y Segura**: Rivales que trazan curvas, adelantan inteligentemente y evitan obstáculos sin realizar maniobras suicidas.
 *   **Obstáculos Destructibles**: Barriles explosivos y neumáticos que reaccionan a los impactos con sistemas de partículas.
 
 ### 🛠️ Tecnología

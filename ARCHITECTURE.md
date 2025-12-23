@@ -106,6 +106,7 @@ Retro-Racer/
 - carsRef: Car[]                  // Coches en la carrera (jugador + IA)
 - trackRef: Segment[]             // Segmentos de la pista
 - inputRef: {...}                 // Estado de teclas (WASD/Arrows)
+- oilStainsRef: OilStain[]        // Manchas de aceite acumulativas en pantalla
 - particlesRef: Particle[]        // Partículas visuales
 ```
 
@@ -171,9 +172,10 @@ Retro-Racer/
 - **Coches**: Sistema de cajas de colisión (rear/side) con física de empuje
 
 **IA**:
-- **Acelera** hacia velocidad objetivo (reducida en curvas cerradas)
-- **Esquiva** al jugador si está delante
-- **Ajusta velocidad** según curva futura (look-ahead de 20 segmentos)
+- **Acelera** hacia velocidad objetivo (frenado inteligente en curvas según severidad).
+- **Esquiva** al jugador y obstáculos priorizando la seguridad.
+- **Seguridad**: "Road Clamping" impide que la IA se salga de la pista innecesariamente. Mantiene velocidad mínima en horquillas para evitar paradas.
+- **Adelantamientos**: Evalúa huecos y ejecuta maniobras de adelantamiento por carriles seguros.
 
 ---
 
@@ -368,7 +370,18 @@ interface Car {
   finished: boolean;
   damage: number;      // 0-100 (explota a 100)
   exploded: boolean;
+  nextCheckpointIndex: number; // Checkpoint parcial
+  evasionState?: string;       // Estado de IA ('normal', 'overtaking', etc.)
 }
+
+#### OilStain (Mancha de Aceite)
+
+```typescript
+interface OilStain {
+  alpha: number; // Opacidad (0-1)
+  seed: number;  // Semilla para forma aleatoria
+}
+```
 ```
 
 #### Segment (Segmento de Pista)
