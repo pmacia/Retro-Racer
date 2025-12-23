@@ -135,6 +135,93 @@ function drawTire(
 }
 
 /**
+ * Draw an oil slick
+ */
+function drawOil(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+): void {
+    ctx.fillStyle = 'rgba(20, 20, 20, 0.8)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, width * 0.8, height * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Iridescent sheen
+    ctx.strokeStyle = 'rgba(100, 100, 255, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(x - width * 0.2, y - height * 0.05, width * 0.4, height * 0.1, 0.2, 0, Math.PI * 2);
+    ctx.stroke();
+}
+
+/**
+ * Draw a water puddle
+ */
+function drawPuddle(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+): void {
+    ctx.fillStyle = 'rgba(100, 150, 255, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, width * 0.9, height * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Reflection/Highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(x + width * 0.2, y - height * 0.1, width * 0.3, height * 0.1, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+/**
+ * Draw a repair kit
+ */
+function drawRepair(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+): void {
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, width * 0.5, width * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const boxW = width * 0.8;
+    const boxH = height * 0.6;
+
+    // Box
+    ctx.fillStyle = 'white';
+    ctx.fillRect(x - boxW / 2, y - boxH, boxW, boxH);
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - boxW / 2, y - boxH, boxW, boxH);
+
+    // Handle
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x - boxW * 0.2, y - boxH);
+    ctx.quadraticCurveTo(x, y - boxH - 10, x + boxW * 0.2, y - boxH);
+    ctx.stroke();
+
+    // Cross
+    ctx.fillStyle = '#ef4444';
+    const crossSize = boxH * 0.4;
+    ctx.fillRect(x - 2, y - boxH / 2 - crossSize / 2, 4, crossSize);
+    ctx.fillRect(x - crossSize / 2, y - boxH / 2 - 2, crossSize, 4);
+}
+
+
+/**
  * Draw a sprite based on its type
  */
 export function drawSprite(
@@ -157,6 +244,15 @@ export function drawSprite(
             break;
         case 'TIRE':
             drawTire(ctx, x, y, width, height);
+            break;
+        case 'OIL':
+            drawOil(ctx, x, y, width, height);
+            break;
+        case 'PUDDLE':
+            drawPuddle(ctx, x, y, width, height);
+            break;
+        case 'REPAIR':
+            drawRepair(ctx, x, y, width, height);
             break;
     }
 }

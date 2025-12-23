@@ -21,7 +21,7 @@ export interface PlayerSettings {
 }
 
 export interface TrackSection {
-  type: 'STRAIGHT' | 'CURVE'; 
+  type: 'STRAIGHT' | 'CURVE';
   length: number; // Number of segments
   curve?: number; // Strength: Negative = Left, Positive = Right. E.g., -2 (Easy Left), 6 (Hard Right)
 }
@@ -95,4 +95,11 @@ export interface Car {
   width: number; // Width of the car in world units (0-1 range relative to road)
   damage: number; // 0 to 100
   exploded: boolean; // True if damage >= 100
+  nextCheckpointIndex: number; // For tracking partial lap progress
+  evasionState?: 'normal' | 'blocked' | 'evading' | 'overtaking'; // AI evasion state
+}
+
+export interface OilStain {
+  alpha: number;
+  seed: number;
 }

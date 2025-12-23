@@ -44,6 +44,12 @@ export function playSound(type: SoundEffect): void {
         case 'DEFEAT':
             playDefeat(ctx, masterGain, t);
             break;
+        case 'HEAL':
+            playHeal(ctx, masterGain, t);
+            break;
+        case 'CHECKPOINT':
+            playCheckpoint(ctx, masterGain, t);
+            break;
     }
 }
 
@@ -257,4 +263,40 @@ function playDefeat(ctx: AudioContext, masterGain: GainNode, t: number): void {
         osc.start(start);
         osc.stop(start + duration);
     });
+}
+
+function playHeal(ctx: AudioContext, masterGain: GainNode, t: number): void {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(880, t); // A5
+    osc.frequency.exponentialRampToValueAtTime(1320, t + 0.1); // E6
+
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.4, t + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+
+    osc.connect(gain);
+    gain.connect(masterGain);
+    osc.start(t);
+    osc.stop(t + 0.3);
+}
+
+function playCheckpoint(ctx: AudioContext, masterGain: GainNode, t: number): void {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1200, t);
+    osc.frequency.exponentialRampToValueAtTime(1800, t + 0.1);
+
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.3, t + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+
+    osc.connect(gain);
+    gain.connect(masterGain);
+    osc.start(t);
+    osc.stop(t + 0.4);
 }

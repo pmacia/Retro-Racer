@@ -23,19 +23,23 @@ export const COLORS = {
 export const OBSTACLES = [
   { type: 'BOULDER', width: 500, height: 400 },
   { type: 'TREE', width: 700, height: 1000 },
-  { type: 'BARREL', width: 450, height: 350 }, // Widen fuel barrel
-  { type: 'TIRE', width: 450, height: 250 }     // Widen Old tire
+  { type: 'BARREL', width: 450, height: 350 },
+  { type: 'TIRE', width: 450, height: 250 },
+  { type: 'OIL', width: 600, height: 100 },    // New: Oil slick
+  { type: 'PUDDLE', width: 800, height: 150 }, // New: Water puddle
+  { type: 'REPAIR', width: 400, height: 400 }  // New: Repair kit
 ];
 
 export const DAMAGE = {
-    MAX: 100,
-    HIT_TREE: 20,
-    HIT_BOULDER: 25,
-    HIT_BARREL: 15,
-    HIT_TIRE: 10,
-    HIT_CAR_REAR: 5,
-    HIT_CAR_SIDE: 3,
-    HIT_CAR_STOPPED: 25 // Hitting a stationary car is like hitting a wall
+  MAX: 100,
+  HIT_TREE: 25,
+  HIT_BOULDER: 30,
+  HIT_BARREL: 15,
+  HIT_TIRE: 10,
+  HIT_CAR_REAR: 3,  // Reduced from 5
+  HIT_CAR_SIDE: 3,
+  HIT_CAR_STOPPED: 30,
+  REPAIR_AMOUNT: -20 // Negative damage = healing
 };
 
 // --- PHYSICS CONFIGURATION ---
@@ -45,10 +49,10 @@ export const PHYSICS = {
   BRAKING: 250,         // Braking power 
   DECEL_COAST: 15,      // Natural friction when letting go of gas (Coast)
   DECEL_OFFROAD: 800,   // High friction when off-road (slows down fast)
-  
+
   // Speed Thresholds
-  SPEED_GRIP_LOSS: 12000, 
-  
+  SPEED_GRIP_LOSS: 12000,
+
   // 1. GEOMETRIC DRIFT (The Tangent Effect)
   // This factor determines how fast the car moves laterally if you don't steer in a curve.
   // Value 0.55 means in a sharp curve (6) at max speed (1.0), 
@@ -56,16 +60,16 @@ export const PHYSICS = {
   // Road is 2.0 units wide (-1 to 1). 
   // You will cross the half-width (1.0) in ~30 frames (0.5 seconds).
   // This effectively breaks the "rail effect" without being instant teleportation.
-  DRIFT_FACTOR: 0.90, 
+  DRIFT_FACTOR: 0.90,
 
   // 2. CENTRIFUGAL FORCE 
   // Grows exponentially with speed. Adds weight/inertia.
-  CENTRIFUGAL_FORCE: 0.35, 
+  CENTRIFUGAL_FORCE: 0.35,
 
   // 3. STEERING SENSITIVITY
   // Must be high enough to counter the Drift Factor.
   // 3.5 allows crossing the full road in ~0.6 seconds at max speed.
-  STEERING_SPEED: 6.0, 
+  STEERING_SPEED: 6.0,
 
   // 4. SPEED DAMPING
   // Reduces steering effectiveness at max speed (Understeer)

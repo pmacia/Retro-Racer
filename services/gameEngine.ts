@@ -5,462 +5,699 @@ import { SEGMENT_LENGTH, ROAD_WIDTH, COLORS, OBSTACLES, PHYSICS, DAMAGE } from '
 // --- Math Helpers ---
 const easeIn = (a: number, b: number, percent: number) => a + (b - a) * Math.pow(percent, 2);
 const easeOut = (a: number, b: number, percent: number) => a + (b - a) * (1 - Math.pow(1 - percent, 2));
-const easeInOut = (a: number, b: number, percent: number) => a + (b - a) * ((-Math.cos(percent * Math.PI) / 2) + 0.5);
 
 export const project = (p: Point3D, cameraX: number, cameraY: number, cameraZ: number, cameraDepth: number, width: number, height: number, roadWidth: number): ProjectPoint => {
-  let dist = p.z - cameraZ;
-  if (dist < 10) dist = 10;
+    let dist = p.z - cameraZ;
+    if (dist < 10) dist = 10;
 
-  let scale = cameraDepth / dist;
-  
-  let x = (1 + scale * (p.x - cameraX)) * width / 2;
-  let y = (1 - scale * (p.y - cameraY)) * height / 2;
-  let w = scale * roadWidth * width / 2;
-  
-  return { x, y, w };
+    let scale = cameraDepth / dist;
+
+    let x = (1 + scale * (p.x - cameraX)) * width / 2;
+    let y = (1 - scale * (p.y - cameraY)) * height / 2;
+    let w = scale * roadWidth * width / 2;
+
+    return { x, y, w };
 };
 
 // --- Track Generation ---
 export const createTrack = (trackDef: TrackDefinition): Segment[] => {
-  const segments: Segment[] = [];
-  const layout = trackDef.layout;
+    const segments: Segment[] = [];
+    const layout = trackDef.layout;
 
-  // 1. Create Segments from Layout
-  layout.forEach(section => {
-    const curveStrength = section.curve || 0;
-    
-    for (let i = 0; i < section.length; i++) {
-       const segment: Segment = {
-          index: segments.length,
-          p1: { x: 0, y: 0, z: segments.length * SEGMENT_LENGTH },
-          p2: { x: 0, y: 0, z: (segments.length + 1) * SEGMENT_LENGTH },
-          curve: curveStrength, 
-          mapX: 0, 
-          mapY: 0,
-          color: { road: '', grass: '', rumble: '' },
-          sprites: [],
-       };
-       
-       if (Math.abs(curveStrength) > 0) {
-           if (i < 10) segment.curve = easeIn(0, curveStrength, i/10);
-           else if (i > section.length - 10) segment.curve = easeOut(curveStrength, 0, (i - (section.length - 10))/10);
-       }
-       
-       const isLight = Math.floor(segments.length / 3) % 2 !== 0;
-       segment.color = {
-         road: isLight ? COLORS.LIGHT.road : COLORS.DARK.road,
-         grass: isLight ? COLORS.LIGHT.grass : COLORS.DARK.grass,
-         rumble: isLight ? COLORS.LIGHT.rumble : COLORS.DARK.rumble,
-         lane: isLight ? COLORS.LIGHT.lane : undefined
-       };
+    // 1. Create Segments from Layout
+    layout.forEach(section => {
+        const curveStrength = section.curve || 0;
 
-       segments.push(segment);
-    }
-  });
+        for (let i = 0; i < section.length; i++) {
+            const segment: Segment = {
+                index: segments.length,
+                p1: { x: 0, y: 0, z: segments.length * SEGMENT_LENGTH },
+                p2: { x: 0, y: 0, z: (segments.length + 1) * SEGMENT_LENGTH },
+                curve: curveStrength,
+                mapX: 0,
+                mapY: 0,
+                color: { road: '', grass: '', rumble: '' },
+                sprites: [],
+            };
 
-  // 2. Loop Closure & Map Generation (2D Coordinates)
-  let rawMapX = 0;
-  let rawMapY = 0;
-  let rawAngle = 0;
-  const anglePerCurveUnit = 0.015; 
-  const mapScale = 0.5;
+            if (Math.abs(curveStrength) > 0) {
+                if (i < 10) segment.curve = easeIn(0, curveStrength, i / 10);
+                else if (i > section.length - 10) segment.curve = easeOut(curveStrength, 0, (i - (section.length - 10)) / 10);
+            }
 
-  segments.forEach(seg => {
-      const angleStep = seg.curve * anglePerCurveUnit;
-      rawAngle += angleStep;
-      rawMapX += Math.sin(rawAngle) * mapScale;
-      rawMapY -= Math.cos(rawAngle) * mapScale;
-  });
+            const isLight = Math.floor(segments.length / 3) % 2 !== 0;
+            segment.color = {
+                road: isLight ? COLORS.LIGHT.road : COLORS.DARK.road,
+                grass: isLight ? COLORS.LIGHT.grass : COLORS.DARK.grass,
+                rumble: isLight ? COLORS.LIGHT.rumble : COLORS.DARK.rumble,
+                lane: isLight ? COLORS.LIGHT.lane : undefined
+            };
 
-  const xCorrectionPerSegment = -rawMapX / segments.length;
-  const yCorrectionPerSegment = -rawMapY / segments.length;
+            segments.push(segment);
+        }
+    });
 
-  let mapX = 0;
-  let mapY = 0;
-  let mapAngle = 0;
+    // 2. Loop Closure & Map Generation (2D Coordinates)
+    let rawMapX = 0;
+    let rawMapY = 0;
+    let rawAngle = 0;
+    const anglePerCurveUnit = 0.015;
+    const mapScale = 0.5;
 
-  segments.forEach((seg, i) => {
-      seg.mapX = mapX;
-      seg.mapY = mapY;
-      
-      const angleStep = seg.curve * anglePerCurveUnit;
-      mapAngle += angleStep;
-      
-      mapX += Math.sin(mapAngle) * mapScale;
-      mapY -= Math.cos(mapAngle) * mapScale;
+    segments.forEach(seg => {
+        const angleStep = seg.curve * anglePerCurveUnit;
+        rawAngle += angleStep;
+        rawMapX += Math.sin(rawAngle) * mapScale;
+        rawMapY -= Math.cos(rawAngle) * mapScale;
+    });
 
-      mapX += xCorrectionPerSegment;
-      mapY += yCorrectionPerSegment;
-  });
+    const xCorrectionPerSegment = -rawMapX / segments.length;
+    const yCorrectionPerSegment = -rawMapY / segments.length;
 
-  // 4. Decoration
-  segments[0].color = COLORS.START;
-  segments[1].color = COLORS.START;
-  for(let i = 0; i < 3; i++) segments[segments.length - 1 - i].color = COLORS.FINISH;
+    let mapX = 0;
+    let mapY = 0;
+    let mapAngle = 0;
 
-  segments.forEach((seg, i) => {
-      // Avoid obstacles on start/finish lines
-      if (i > 50 && i < segments.length - 50) {
-          if (i % 20 === 0 && Math.random() > 0.4) {
-              const r = Math.random();
-              let type = 'TREE';
-              if (r < 0.2) type = 'BOULDER';
-              else if (r < 0.4) type = 'BARREL';
-              else if (r < 0.6) type = 'TIRE';
+    segments.forEach((seg) => {
+        seg.mapX = mapX;
+        seg.mapY = mapY;
 
-              const spriteData = OBSTACLES.find(o => o.type === type);
-              if (spriteData) {
-                  // Random offset, but keep some on the road occasionally for tires/barrels
-                  let offset = (Math.random() * 3 + 1.2) * (Math.random() > 0.5 ? 1 : -1);
-                  
-                  // Tires and Barrels can be on the road
-                  if (type === 'TIRE' || type === 'BARREL') {
-                      if (Math.random() > 0.7) {
-                          offset = (Math.random() * 1.5 - 0.75); // On road
-                      }
-                  }
+        const angleStep = seg.curve * anglePerCurveUnit;
+        mapAngle += angleStep;
 
-                  seg.sprites.push({
-                      source: type,
-                      offset: offset,
-                      width: spriteData.width,
-                      height: spriteData.height
-                  });
-              }
-          }
-      }
-  });
+        mapX += Math.sin(mapAngle) * mapScale;
+        mapY -= Math.cos(mapAngle) * mapScale;
 
-  return segments;
-};
+        mapX += xCorrectionPerSegment;
+        mapY += yCorrectionPerSegment;
+    });
+
+    // 4. Decoration
+    segments[0].color = COLORS.START;
+    segments[1].color = COLORS.START;
+    for (let i = 0; i < 3; i++) segments[segments.length - 1 - i].color = COLORS.FINISH;
+
+    segments.forEach((seg, i) => {
+        // Avoid obstacles on start/finish lines
+        if (i > 50 && i < segments.length - 50) {
+            if (i % 15 === 0 && Math.random() > 0.15) {
+                const r = Math.random();
+                let type = 'TREE';
+                if (r < 0.30) type = 'BOULDER';
+                else if (r < 0.40) type = 'BARREL';
+                else if (r < 0.50) type = 'TIRE';
+                else if (r < 0.55) type = 'OIL';
+                else if (r < 0.60) type = 'PUDDLE';
+                // REPAIR removed from here to be independent
+
+                const spriteData = OBSTACLES.find(o => o.type === type);
+                if (spriteData) {
+                    // Random offset
+                    let offset = (Math.random() * 3 + 1.2) * (Math.random() > 0.5 ? 1 : -1);
+
+                    // Road-based obstacles
+                    const onRoadTypes = ['TIRE', 'BARREL', 'OIL', 'PUDDLE', 'REPAIR'];
+                    if (onRoadTypes.includes(type)) {
+                        if (Math.random() > 0.5) {
+                            offset = (Math.random() * 1.6 - 0.8); // On road
+                        }
+                    }
+
+                    seg.sprites.push({
+                        source: type,
+                        offset: offset,
+                        width: spriteData.width,
+                        height: spriteData.height
+                    });
+                }
+            }
+        }
+
+        // Independent Repair Kit Generation (Every 150 segments, independent of other obstacles)
+        if (i > 50 && i < segments.length - 50 && i % 150 === 0 && Math.random() > 0.5) {
+            const spriteData = OBSTACLES.find(o => o.type === 'REPAIR');
+            if (spriteData) {
+                seg.sprites.push({
+                    source: 'REPAIR',
+                    offset: (Math.random() * 1.6 - 0.8),
+                    width: spriteData.width,
+                    height: spriteData.height
+                });
+            }
+        }
+    });
+
+    return segments;
+}
 
 export const createCars = (playerColor: string, playerName: string, difficulty: Difficulty, referenceAvgSpeedKmh: number = 0): Car[] => {
-  let aiMaxSpeed = 22000; 
-  const referenceSpeedUnits = referenceAvgSpeedKmh * 100; 
+    let aiMaxSpeed = 22000;
+    const referenceSpeedUnits = referenceAvgSpeedKmh * 100;
 
-  switch (difficulty) {
-    case Difficulty.ROOKIE:
-      aiMaxSpeed = 16000; 
-      break;
-    case Difficulty.AMATEUR:
-      if (referenceSpeedUnits > 0) aiMaxSpeed = referenceSpeedUnits * 0.90;
-      else aiMaxSpeed = 20000;
-      break;
-    case Difficulty.PRO:
-      if (referenceSpeedUnits > 0) aiMaxSpeed = referenceSpeedUnits * 1.05;
-      else aiMaxSpeed = 23500;
-      aiMaxSpeed = Math.min(aiMaxSpeed, PHYSICS.MAX_SPEED + 1000); 
-      break;
-  }
-
-  return [
-    {
-      offset: 0,
-      z: 0,
-      speed: 0,
-      maxSpeed: PHYSICS.MAX_SPEED, 
-      accel: PHYSICS.ACCEL,
-      name: playerName,
-      color: playerColor,
-      isPlayer: true,
-      isNpc: false,
-      lap: 1,
-      lapTime: 0,
-      finished: false,
-      width: 0.5,
-      damage: 0,
-      exploded: false
-    },
-    {
-      offset: -0.5,
-      z: 2000, 
-      speed: aiMaxSpeed * 0.8,
-      maxSpeed: aiMaxSpeed,
-      accel: PHYSICS.ACCEL * 0.9,
-      name: `CPU [${difficulty === Difficulty.PRO ? 'PRO' : difficulty === Difficulty.AMATEUR ? 'AVG' : 'NOOB'}]`,
-      color: '#FF0000',
-      isPlayer: false,
-      isNpc: true,
-      lap: 1,
-      lapTime: 0,
-      finished: false,
-      width: 0.5,
-      damage: 0,
-      exploded: false
+    switch (difficulty) {
+        case Difficulty.ROOKIE:
+            aiMaxSpeed = 16000;
+            break;
+        case Difficulty.AMATEUR:
+            if (referenceSpeedUnits > 0) aiMaxSpeed = referenceSpeedUnits * 0.90;
+            else aiMaxSpeed = 20000;
+            break;
+        case Difficulty.PRO:
+            if (referenceSpeedUnits > 0) aiMaxSpeed = referenceSpeedUnits * 1.05;
+            else aiMaxSpeed = 23500;
+            aiMaxSpeed = Math.min(aiMaxSpeed, PHYSICS.MAX_SPEED + 1000);
+            break;
     }
-  ];
+
+    return [
+        {
+            offset: 0,
+            z: 0,
+            speed: 0,
+            maxSpeed: PHYSICS.MAX_SPEED,
+            accel: PHYSICS.ACCEL,
+            name: playerName,
+            color: playerColor,
+            isPlayer: true,
+            isNpc: false,
+            lap: 1,
+            lapTime: 0,
+            finished: false,
+            width: 0.5,
+            damage: 0,
+            exploded: false,
+            nextCheckpointIndex: 1
+        },
+        {
+            offset: -0.5,
+            z: 2000,
+            speed: aiMaxSpeed * 0.8,
+            maxSpeed: aiMaxSpeed,
+            accel: PHYSICS.ACCEL * 0.9,
+            name: `CPU [${difficulty === Difficulty.PRO ? 'PRO' : difficulty === Difficulty.AMATEUR ? 'AVG' : 'NOOB'}]`,
+            color: '#FF0000',
+            isPlayer: false,
+            isNpc: true,
+            lap: 1,
+            lapTime: 0,
+            finished: false,
+            width: 0.5,
+            damage: 0,
+            exploded: false,
+            nextCheckpointIndex: 1
+        }
+    ];
 };
 
 export const updateGame = (
-    cars: Car[], 
-    track: Segment[], 
-    input: { left: boolean, right: boolean, up: boolean, down: boolean }, 
-    dt: number, 
+    cars: Car[],
+    track: Segment[],
+    input: { left: boolean, right: boolean, up: boolean, down: boolean },
+    dt: number,
     totalLaps: number,
     callbacks: {
-        onObstacleHit: (type: string) => void;
-        onCarHit: (type: 'REAR' | 'SIDE', severity: number) => void;
+        onObstacleHit: (type: string, worldX: number, worldY: number, worldZ: number) => void;
+        onCarHit: (type: 'REAR' | 'SIDE', severity: number, worldX: number, worldY: number, worldZ: number) => void;
+        onCheckpoint: (car: Car) => void;
     }
 ) => {
-  const player = cars[0];
-  const trackLength = track.length * SEGMENT_LENGTH;
-  
-  // If exploded, stop everything for player
-  if (player.exploded) {
-      player.speed = 0;
-      return;
-  }
+    const player = cars[0];
+    const trackLength = track.length * SEGMENT_LENGTH;
 
-  // --- 1. COLLISION WITH OBSTACLES ---
-  const currentSegIdx = Math.floor(player.z / SEGMENT_LENGTH);
-  
-  // Scan forward 2 segments to catch obstacles that are visually close
-  for (let n = 0; n <= 2; n++) {
-      const checkIdx = (currentSegIdx + n) % track.length;
-      const segment = track[checkIdx];
+    // If exploded, stop everything for player
+    if (player.exploded) {
+        player.speed = 0;
+        return;
+    }
 
-      for (let i = segment.sprites.length - 1; i >= 0; i--) {
-          const sprite = segment.sprites[i];
-          const spriteW = (sprite.width / ROAD_WIDTH) * 0.6;
-          
-          if (Math.abs(player.offset - sprite.offset) < (spriteW + 0.15)) {
-              
-              const segZ = checkIdx * SEGMENT_LENGTH;
-              let distZ = player.z - segZ;
-              if (distZ < -trackLength/2) distZ += trackLength;
-              if (distZ > trackLength/2) distZ -= trackLength;
+    // --- 1. COLLISION WITH OBSTACLES ---
+    cars.forEach(car => {
+        if (car.exploded || car.finished) return;
 
-              // Check if physically close
-              if (Math.abs(distZ) < SEGMENT_LENGTH) {
-                  let dmg = 0;
-                  if (sprite.source === 'TREE') dmg = DAMAGE.HIT_TREE;
-                  else if (sprite.source === 'BOULDER') dmg = DAMAGE.HIT_BOULDER;
-                  else if (sprite.source === 'BARREL') dmg = DAMAGE.HIT_BARREL;
-                  else if (sprite.source === 'TIRE') dmg = DAMAGE.HIT_TIRE;
+        const currentSegIdx = Math.floor(car.z / SEGMENT_LENGTH);
+        const speedRatio = car.speed / car.maxSpeed;
 
-                  if (player.speed > 1000) {
-                      if (sprite.source === 'BARREL' || sprite.source === 'TIRE') {
-                          segment.sprites.splice(i, 1);
-                          player.damage += dmg;
-                          callbacks.onObstacleHit(sprite.source);
-                      } else {
-                          // Solid Hit
-                          player.damage += dmg;
-                          player.speed = 0;
-                          callbacks.onObstacleHit(sprite.source);
-                      }
-                      if (player.damage >= DAMAGE.MAX) player.exploded = true;
-                  }
-              }
-          }
-      }
-  }
+        // Scan forward 2 segments
+        for (let n = 0; n <= 2; n++) {
+            const checkIdx = (currentSegIdx + n) % track.length;
+            const segment = track[checkIdx];
 
-  // --- 2. COLLISION WITH RIVAL ---
-  const rival = cars[1];
-  if (rival && !rival.finished && !player.finished) {
-      let distZ = player.z - rival.z;
-      // Handle Loop Wrapping
-      if (distZ > trackLength / 2) distZ -= trackLength;
-      if (distZ < -trackLength / 2) distZ += trackLength;
+            for (let i = segment.sprites.length - 1; i >= 0; i--) {
+                const sprite = segment.sprites[i];
+                const spriteW = (sprite.width / ROAD_WIDTH) * 0.6;
 
-      // Detection Box
-      const CAR_HIT_LENGTH = 700; 
-      const CAR_HIT_WIDTH = 0.8; 
+                // Collision detection (Car width is ~0.3 units in offset space)
+                if (Math.abs(car.offset - sprite.offset) < (spriteW + 0.15)) {
 
-      if (Math.abs(distZ) < CAR_HIT_LENGTH) {
-          if (Math.abs(player.offset - rival.offset) < CAR_HIT_WIDTH) {
-              
-              const isLongitudinalHit = Math.abs(distZ) > 250; 
-              const playerIsBehind = distZ < 0; 
+                    const segZ = checkIdx * SEGMENT_LENGTH;
+                    let distZ = car.z - segZ;
+                    if (distZ > trackLength / 2) distZ -= trackLength;
+                    if (distZ < -trackLength / 2) distZ += trackLength;
 
-              if (isLongitudinalHit) {
-                  // --- REAR/FRONT COLLISION (BOUNCE BACK) ---
-                  if (playerIsBehind) {
-                      // Player hits Rival's rear
-                      if (player.speed > rival.speed) {
-                          player.damage += DAMAGE.HIT_CAR_REAR;
-                          // Brake hard to avoid passing through
-                          player.speed = rival.speed * 0.75; 
-                          rival.speed += 500; // Push rival forward slightly
-                          
-                          // Force Z separation
-                          let newZ = rival.z - (CAR_HIT_LENGTH + 20);
-                          if (newZ < 0) newZ += trackLength;
-                          player.z = newZ;
-                          
-                          callbacks.onCarHit('REAR', 1.0);
-                      }
-                  } else {
-                      // Rival hits Player's rear
-                      if (rival.speed > player.speed) {
-                          // Minimal Damage
-                          player.damage += 0.5; 
-                          
-                          // AI Brakes hard to stop pushing
-                          rival.speed = player.speed * 0.85; 
-                          player.speed += 300; // Small boost for player
-                          
-                          // Strict Separation
-                          let newZ = player.z - 750; 
-                          if (newZ < 0) newZ += trackLength;
-                          rival.z = newZ;
-                          
-                          callbacks.onCarHit('REAR', 0.5);
-                      }
-                  }
-              } else {
-                  // --- SIDE COLLISION (DEFLECT) ---
-                  player.damage += DAMAGE.HIT_CAR_SIDE;
-                  
-                  // Deflect in opposite directions
-                  const pushDir = player.offset > rival.offset ? 1 : -1;
-                  const pushForce = 0.3; 
+                    // Physical proximity check
+                    if (Math.abs(distZ) < 500) {
+                        let baseDmg = 0;
+                        let stopCar = false;
+                        let destroySprite = false;
 
-                  player.offset += pushDir * pushForce;
-                  rival.offset -= pushDir * pushForce;
-                  
-                  // Slight speed penalty for friction
-                  player.speed *= 0.98;
-                  rival.speed *= 0.98;
-                  
-                  callbacks.onCarHit('SIDE', 0.5);
-              }
+                        // Handle specific obstacle effects
+                        switch (sprite.source) {
+                            case 'TREE': baseDmg = DAMAGE.HIT_TREE; stopCar = true; break;
+                            case 'BOULDER': baseDmg = DAMAGE.HIT_BOULDER; stopCar = true; break;
+                            case 'BARREL': baseDmg = DAMAGE.HIT_BARREL; destroySprite = true; break;
+                            case 'TIRE': baseDmg = DAMAGE.HIT_TIRE; destroySprite = true; break;
+                            case 'OIL':
+                                car.offset += (car.offset > sprite.offset ? 0.2 : -0.2);
+                                break;
+                            case 'PUDDLE':
+                                car.speed *= 0.95;
+                                break;
+                            case 'REPAIR':
+                                car.damage = Math.max(0, car.damage + DAMAGE.REPAIR_AMOUNT);
+                                destroySprite = true;
+                                break;
+                        }
 
-              if (player.damage >= DAMAGE.MAX) player.exploded = true;
-          }
-      }
-  }
+                        if (car.speed > 1000 || sprite.source === 'REPAIR') {
+                            const actualDmg = baseDmg > 0 ? baseDmg * (0.5 + speedRatio * 0.5) : 0;
+                            car.damage += actualDmg;
+
+                            if (destroySprite) {
+                                segment.sprites.splice(i, 1);
+                            }
+
+                            if (stopCar) car.speed = 0;
+
+                            callbacks.onObstacleHit(sprite.source, sprite.offset * ROAD_WIDTH, 0, segZ);
+
+                            if (car.damage >= DAMAGE.MAX) car.exploded = true;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // --- 2. COLLISION WITH RIVAL ---
+    const rival = cars[1];
+    if (rival && !rival.finished && !player.finished && !rival.exploded) {
+        let distZ = player.z - rival.z;
+        // Handle Loop Wrapping
+        if (distZ > trackLength / 2) distZ -= trackLength;
+        if (distZ < -trackLength / 2) distZ += trackLength;
+
+        // Detection Box
+        const CAR_HIT_LENGTH = 700;
+        const CAR_HIT_WIDTH = 0.45; // Reduced from 0.6 to allow tighter overtaking
+
+        if (Math.abs(distZ) < CAR_HIT_LENGTH) {
+            if (Math.abs(player.offset - rival.offset) < CAR_HIT_WIDTH) {
+
+                const isLongitudinalHit = Math.abs(distZ) > 350; // Balanced rear vs side
+                const playerIsBehind = distZ < 0;
+
+                if (isLongitudinalHit) {
+                    // --- REAR/FRONT COLLISION (BOUNCE BACK) ---
+                    const speedRatio = Math.max(player.speed / player.maxSpeed, rival.speed / rival.maxSpeed);
+                    const scaledDmg = DAMAGE.HIT_CAR_REAR * (0.5 + speedRatio * 0.5);
+
+                    if (playerIsBehind) {
+                        // Player hits Rival's rear
+                        if (player.speed > rival.speed) {
+                            player.damage += scaledDmg;
+                            rival.damage += scaledDmg * 0.5;
+
+                            player.speed = rival.speed * 0.75;
+                            rival.speed += 500;
+
+                            let newZ = rival.z - (CAR_HIT_LENGTH + 20);
+                            if (newZ < 0) newZ += trackLength;
+                            player.z = newZ;
+
+                            callbacks.onCarHit('REAR', 1.0, player.offset * ROAD_WIDTH, 0, player.z);
+                        }
+                    } else {
+                        // Rival hits Player's rear
+                        if (rival.speed > player.speed) {
+                            player.damage += scaledDmg * 0.2;
+                            rival.damage += scaledDmg;
+
+                            rival.speed = player.speed * 0.85;
+                            player.speed += 300;
+
+                            let newZ = player.z - 750;
+                            if (newZ < 0) newZ += trackLength;
+                            rival.z = newZ;
+
+                            callbacks.onCarHit('REAR', 0.5, player.offset * ROAD_WIDTH, 0, player.z);
+                        }
+                    }
+                } else {
+                    // --- SIDE COLLISION (DEFLECT) ---
+                    const speedRatio = Math.max(player.speed / player.maxSpeed, rival.speed / rival.maxSpeed);
+                    const scaledDmg = DAMAGE.HIT_CAR_SIDE * (0.5 + speedRatio * 0.5);
+
+                    player.damage += scaledDmg;
+                    rival.damage += scaledDmg;
+
+                    // Deflect in opposite directions
+                    const pushDir = player.offset > rival.offset ? 1 : -1;
+                    const speedDiffFactor = Math.abs(player.speed - rival.speed) / 10000;
+                    const pushForce = 0.4 + (speedDiffFactor * 0.2);
+
+                    player.offset += pushDir * pushForce;
+                    rival.offset -= pushDir * pushForce;
+
+                    player.speed *= 0.97;
+                    rival.speed *= 0.97;
+
+                    callbacks.onCarHit('SIDE', 0.5, player.offset * ROAD_WIDTH, 0, player.z);
+                }
+
+                if (player.damage >= DAMAGE.MAX) player.exploded = true;
+                if (rival.damage >= DAMAGE.MAX) rival.exploded = true;
+            }
+        }
+    }
 
 
-  // --- PHYSICS ENGINE ---
-  
-  // 1. Longitudinal (Accel/Brake)
-  if (input.up) {
-      player.speed += player.accel;
-  } else if (input.down) {
-      player.speed -= PHYSICS.BRAKING; 
-  } else {
-      player.speed -= PHYSICS.DECEL_COAST; 
-  }
+    // --- PHYSICS ENGINE ---
 
-  // Offroad friction (Quadratic)
-  const offroadDist = Math.abs(player.offset) - 0.75;
-  if (offroadDist > 0) {
-     const depth = Math.min(1.0, offroadDist / 0.5); 
-     player.speed -= (depth * depth * PHYSICS.DECEL_OFFROAD);
-  }
+    // 1. Longitudinal (Accel/Brake)
+    if (input.up) {
+        player.speed += player.accel;
+    } else if (input.down) {
+        player.speed -= PHYSICS.BRAKING;
+    } else {
+        player.speed -= PHYSICS.DECEL_COAST;
+    }
 
-  player.speed = Math.max(0, Math.min(player.speed, player.maxSpeed));
-  
-  // Normalized Speed (0.0 to 1.0)
-  const speedRatio = player.speed / player.maxSpeed; 
+    // Offroad friction (Quadratic)
+    const offroadDist = Math.abs(player.offset) - 0.75;
+    if (offroadDist > 0) {
+        const depth = Math.min(1.0, offroadDist / 0.5);
+        player.speed -= (depth * depth * PHYSICS.DECEL_OFFROAD);
+    }
 
-  // 2. Lateral (Tangent Drift + Centrifugal)
-  const playerSegment = track[Math.floor(player.z / SEGMENT_LENGTH) % track.length];
-  const curve = playerSegment.curve;
-  
-  if (player.speed > 0 && curve !== 0) {
-      const geometricForce = curve * speedRatio * PHYSICS.DRIFT_FACTOR;
-      const centrifugalForce = curve * (speedRatio * speedRatio) * PHYSICS.CENTRIFUGAL_FORCE;
-      
-      const totalDrift = (geometricForce + centrifugalForce) * dt;
-      player.offset -= totalDrift;
-  }
+    player.speed = Math.max(0, Math.min(player.speed, player.maxSpeed));
 
-  // 3. Steering Input
-  const steeringInput = input.left ? -1 : input.right ? 1 : 0;
-  if (steeringInput !== 0) {
-      let effectiveRatio = Math.max(0.1, speedRatio); 
-      
-      if (speedRatio > 0.8) {
-          const dampFactor = (speedRatio - 0.8) / 0.2; 
-          effectiveRatio *= (1.0 - (dampFactor * PHYSICS.SPEED_STEERING_DAMPING));
-      }
+    // Normalized Speed (0.0 to 1.0)
+    const speedRatio = player.speed / player.maxSpeed;
 
-      const steer = steeringInput * PHYSICS.STEERING_SPEED * effectiveRatio * dt;
-      player.offset += steer;
-  }
+    // 2. Lateral (Tangent Drift + Centrifugal)
+    const playerSegment = track[Math.floor(player.z / SEGMENT_LENGTH) % track.length];
+    const curve = playerSegment.curve;
 
-  // Bounds clamping
-  if (player.offset < -3) player.offset = -3;
-  if (player.offset > 3) player.offset = 3;
+    if (player.speed > 0 && curve !== 0) {
+        const geometricForce = curve * speedRatio * PHYSICS.DRIFT_FACTOR;
+        const centrifugalForce = curve * (speedRatio * speedRatio) * PHYSICS.CENTRIFUGAL_FORCE;
 
-  // 4. POSITION UPDATE
-  player.z += player.speed * dt;
+        const totalDrift = (geometricForce + centrifugalForce) * dt;
+        player.offset -= totalDrift;
+    }
 
-  // --- 5. RIVAL AI LOGIC ---
-  const ai = cars[1]; // CPU
-  if (ai && !ai.finished && !ai.exploded) {
-      const aiSegment = track[Math.floor(ai.z / SEGMENT_LENGTH) % track.length];
-      
-      // AI Physics Model
-      // 1. Acceleration
-      const lookAhead = 20;
-      const futureSegment = track[(Math.floor(ai.z / SEGMENT_LENGTH) + lookAhead) % track.length];
-      const futureCurve = Math.abs(futureSegment.curve);
-      
-      let targetSpeed = ai.maxSpeed;
-      if (futureCurve > 2) {
-          targetSpeed = ai.maxSpeed * (1 - (futureCurve / 15)); // Slow down for corners
-      }
+    // 3. Steering Input
+    const steeringInput = input.left ? -1 : input.right ? 1 : 0;
+    if (steeringInput !== 0) {
+        let effectiveRatio = Math.max(0.1, speedRatio);
 
-      if (ai.speed < targetSpeed) {
-          ai.speed += ai.accel;
-      } else {
-          ai.speed -= PHYSICS.BRAKING * 0.5;
-      }
-      
-      // 2. Steering / Lateral Control
-      const aiSpeedRatio = ai.speed / ai.maxSpeed;
-      const aiCurve = aiSegment.curve;
-      
-      if (ai.speed > 0 && aiCurve !== 0) {
-           const drift = aiCurve * aiSpeedRatio * PHYSICS.DRIFT_FACTOR * dt;
-           ai.offset -= drift;
-      }
+        if (speedRatio > 0.8) {
+            const dampFactor = (speedRatio - 0.8) / 0.2;
+            effectiveRatio *= (1.0 - (dampFactor * PHYSICS.SPEED_STEERING_DAMPING));
+        }
 
-      // 3. DODGING LOGIC
-      let targetOffset = -0.4; // Default preference
+        const steer = steeringInput * PHYSICS.STEERING_SPEED * effectiveRatio * dt;
+        player.offset += steer;
+    }
 
-      let distToPlayer = player.z - ai.z;
-      if (distToPlayer < -trackLength/2) distToPlayer += trackLength;
-      if (distToPlayer > trackLength/2) distToPlayer -= trackLength;
+    // Bounds clamping
+    if (player.offset < -3) player.offset = -3;
+    if (player.offset > 3) player.offset = 3;
 
-      if (distToPlayer > 0 && distToPlayer < 1500) {
-          if (ai.speed > player.speed) {
-              if (player.offset > 0.1) targetOffset = -0.6;
-              else if (player.offset < -0.1) targetOffset = 0.6;
-              else targetOffset = ai.offset > 0 ? 0.6 : -0.6;
-          }
-      }
+    // 4. POSITION UPDATE
+    player.z += player.speed * dt;
 
-      const diff = targetOffset - ai.offset;
-      const steerPower = PHYSICS.STEERING_SPEED * 0.8; 
-      
-      if (Math.abs(diff) > 0.1) {
-          const dir = diff > 0 ? 1 : -1;
-          ai.offset += dir * steerPower * aiSpeedRatio * dt;
-      }
+    // --- 5. RIVAL AI LOGIC ---
+    cars.forEach(car => {
+        if (car.isPlayer || car.finished || car.exploded) {
+            if (car.exploded) car.speed = 0;
+            return;
+        }
 
-      if (ai.offset < -2) ai.offset = -2;
-      if (ai.offset > 2) ai.offset = 2;
+        const ai = car;
+        const aiSegment = track[Math.floor(ai.z / SEGMENT_LENGTH) % track.length];
 
-      ai.z += ai.speed * dt;
-  }
+        // AI Physics Model
+        // 1. Acceleration & Braking
+        const lookAhead = 20;
+        const futureSegment = track[(Math.floor(ai.z / SEGMENT_LENGTH) + lookAhead) % track.length];
+        const futureCurve = Math.abs(futureSegment.curve);
 
-  // --- 6. LAP MANAGEMENT ---
-  cars.forEach(car => {
-      if (car.z >= trackLength) {
-          car.z -= trackLength;
-          car.lap++;
-          if (car.lap > totalLaps && !car.finished) {
-              car.finished = true;
-          }
-      }
-      else if (car.z < 0) {
-          car.z += trackLength;
-          car.lap--;
-      }
-  });
+        let distToPlayer = player.z - ai.z;
+        if (distToPlayer < -trackLength / 2) distToPlayer += trackLength;
+        if (distToPlayer > trackLength / 2) distToPlayer -= trackLength;
+
+        let targetSpeed = ai.maxSpeed;
+        if (futureCurve > 2) {
+            targetSpeed = ai.maxSpeed * (1 - (futureCurve / 15)); // Slow down for corners
+        }
+
+        // Initialize evasion state if not set
+        if (!ai.evasionState) ai.evasionState = 'normal';
+
+        // === STATE-BASED OVERTAKING LOGIC ===
+        const isPlayerInFront = distToPlayer > 0 && distToPlayer < 2500;
+        const lateralDistance = Math.abs(player.offset - ai.offset);
+        const isPlayerBlocking = isPlayerInFront && lateralDistance < 1.2; // More sensitive blocking detection
+
+        // STATE TRANSITIONS
+        if (ai.evasionState === 'normal') {
+            if (isPlayerBlocking && distToPlayer < 2000) {
+                ai.evasionState = 'blocked';
+            }
+        } else if (ai.evasionState === 'blocked') {
+            if (!isPlayerBlocking || distToPlayer > 2500) {
+                ai.evasionState = 'normal';
+            } else {
+                // Immediately start evading when blocked
+                ai.evasionState = 'evading';
+            }
+        } else if (ai.evasionState === 'evading') {
+            // Check if we found a gap - more realistic detection
+            const hasLeftGap = player.offset > 0.3 && ai.offset < -0.3;
+            const hasRightGap = player.offset < -0.3 && ai.offset > 0.3;
+
+            if (hasLeftGap || hasRightGap) {
+                ai.evasionState = 'overtaking';
+            } else if (!isPlayerInFront || distToPlayer > 2500) {
+                ai.evasionState = 'normal';
+            } else if (!isPlayerBlocking && distToPlayer < 1500) {
+                // If player moved aside but we're still close, go for overtake
+                ai.evasionState = 'overtaking';
+            }
+        } else if (ai.evasionState === 'overtaking') {
+            // Check if we successfully passed or got blocked again
+            if (distToPlayer < 0 || distToPlayer > 3000) {
+                ai.evasionState = 'normal';
+            } else if (isPlayerBlocking && distToPlayer < 1200) {
+                ai.evasionState = 'evading'; // Player blocked us again
+            }
+        }
+
+        // SPEED CONTROL BASED ON STATE
+        if (ai.evasionState === 'blocked') {
+            // Brake to maintain safe distance, but keep minimum speed
+            const safetyGap = 600;
+            const minBlockedSpeed = ai.maxSpeed * 0.2; // Minimum speed to allow transition to evading
+
+            if (distToPlayer < safetyGap) {
+                ai.speed -= PHYSICS.BRAKING * 1.8; // Hard brake
+                if (ai.speed < minBlockedSpeed) ai.speed = minBlockedSpeed;
+            } else {
+                const targetSpeed = Math.max(minBlockedSpeed, player.speed * 0.85);
+                ai.speed = Math.min(ai.speed, targetSpeed);
+            }
+        } else if (ai.evasionState === 'evading') {
+            // Maintain minimum speed for evasion maneuvers, even if player is stopped
+            const minEvasionSpeed = ai.maxSpeed * 0.3; // Minimum 30% speed for visible movement
+            const targetEvasionSpeed = Math.max(minEvasionSpeed, player.speed * 0.9);
+
+            if (ai.speed > targetEvasionSpeed + 10) {
+                ai.speed -= PHYSICS.BRAKING * 0.5;
+            } else if (ai.speed < targetEvasionSpeed - 10) {
+                ai.speed += ai.accel * 0.8;
+            }
+        } else if (ai.evasionState === 'overtaking') {
+            // ACCELERATE DECISIVELY
+            ai.speed += ai.accel * 1.5; // Boost acceleration
+            if (ai.speed > ai.maxSpeed * 1.1) ai.speed = ai.maxSpeed * 1.1; // Allow slight overspeed
+        } else {
+            // Normal speed control
+            if (ai.speed < targetSpeed) {
+                ai.speed += ai.accel;
+            } else {
+                ai.speed -= PHYSICS.BRAKING * 0.5;
+            }
+        }
+
+        // 2. Steering / Lateral Control
+        const aiSpeedRatio = ai.speed / ai.maxSpeed;
+        const aiCurve = aiSegment.curve;
+
+        if (ai.speed > 0 && aiCurve !== 0) {
+            const drift = aiCurve * aiSpeedRatio * PHYSICS.DRIFT_FACTOR * dt;
+            ai.offset -= drift;
+        }
+
+        // 3. DODGING & AVOIDANCE LOGIC
+        let targetOffset = -0.4; // Default preference
+
+        // A. Scan for Objects (Obstacles & Repair Kits)
+        const scanDistance = 30; // Obstacle scan
+        const repairScanDistance = 50; // Proactive repair scan
+        const currentAIIdx = Math.floor(ai.z / SEGMENT_LENGTH);
+        let obstacleToAvoid = null;
+        let repairKitToSeek = null;
+        let distToObstacle = 0;
+
+        for (let n = 1; n <= repairScanDistance; n++) {
+            const checkIdx = (currentAIIdx + n) % track.length;
+            const segment = track[checkIdx];
+            for (const sprite of segment.sprites) {
+                const spriteW = (sprite.width / ROAD_WIDTH) * 0.6;
+
+                // Prioritize Repair Kit if damage > 5%
+                if (sprite.source === 'REPAIR' && ai.damage > 5) {
+                    if (!repairKitToSeek) {
+                        repairKitToSeek = sprite;
+                    }
+                }
+
+                // Obstacle detection (only within scanDistance)
+                if (n <= scanDistance) {
+                    if (sprite.source !== 'REPAIR' && Math.abs(ai.offset - sprite.offset) < (spriteW + 0.5)) {
+                        if (!obstacleToAvoid) {
+                            obstacleToAvoid = sprite;
+                            distToObstacle = n;
+                        }
+                    }
+                }
+            }
+            // If we found an obstacle very close, prioritize avoidance over repair
+            if (obstacleToAvoid && distToObstacle < 10) break;
+        }
+
+        if (obstacleToAvoid) {
+            // Obstacle avoidance always takes priority
+            const urgency = 1.0 - (distToObstacle / scanDistance);
+            const safetyMargin = 0.7 + (urgency * 0.3);
+
+            if (ai.offset > obstacleToAvoid.offset) targetOffset = Math.min(2.0, obstacleToAvoid.offset + safetyMargin);
+            else targetOffset = Math.max(-2.0, obstacleToAvoid.offset - safetyMargin);
+        } else if (repairKitToSeek && ai.evasionState === 'normal') {
+            // Seek repair kit only when not in evasion mode
+            targetOffset = repairKitToSeek.offset;
+        } else if (ai.evasionState === 'evading') {
+            // ULTRA-AGGRESSIVE REACTIVE EVASION
+            // Detect which side player is on and move to opposite side FAST
+            const playerSide = player.offset > 0 ? 1 : -1;
+            const aiSide = ai.offset > 0 ? 1 : -1;
+
+            // Use time-based oscillation for very rapid movement with EXTREME amplitude
+            const time = Date.now() / 1000;
+            const rapidOscillation = Math.sin(time * 10) * 4.5; // 10 Hz oscillation, EXTREME amplitude 4.5
+
+            // If player is on same side as AI, move to opposite side immediately
+            if (playerSide === aiSide) {
+                targetOffset = -playerSide * 3.5; // Go to EXTREME opposite side
+            } else {
+                // Player is on opposite side, use rapid oscillation to find gap
+                targetOffset = rapidOscillation;
+            }
+
+            // Add position-based component for variety with extreme amplitude
+            const positionZigZag = Math.sin(ai.z * 0.1) * 3.5;
+            targetOffset = (targetOffset + positionZigZag) / 2; // Combine both for unpredictability
+        } else if (ai.evasionState === 'overtaking') {
+            // COMMIT TO OVERTAKING SIDE
+            if (player.offset > 0) {
+                targetOffset = -2.0; // Pass on the left
+            } else {
+                targetOffset = 2.0; // Pass on the right
+            }
+        } else if (ai.evasionState === 'blocked') {
+            // Stay behind but prepare to evade
+            targetOffset = ai.offset; // Maintain current position
+        } else {
+            // Normal driving - avoid player if close
+            distToPlayer = player.z - ai.z;
+            if (distToPlayer < -trackLength / 2) distToPlayer += trackLength;
+            if (distToPlayer > trackLength / 2) distToPlayer -= trackLength;
+
+            if (distToPlayer > 0 && distToPlayer < 3000 && ai.speed > player.speed * 0.7) {
+                if (player.offset > 0.1) targetOffset = -1.0;
+                else if (player.offset < -0.1) targetOffset = 1.0;
+                else targetOffset = ai.offset > 0 ? 1.0 : -1.0;
+            }
+        }
+
+        const diff = targetOffset - ai.offset;
+        let steerPower = PHYSICS.STEERING_SPEED * 0.5;
+
+        // Boost steering in evasion and overtaking states
+        if (ai.evasionState === 'evading') {
+            steerPower *= 5.0; // ULTRA-aggressive steering during evasion for very rapid movement
+        } else if (ai.evasionState === 'overtaking') {
+            steerPower *= 2.5; // Decisive steering during overtake
+        }
+
+        // Emergency boost for obstacles
+        const isEmergency = (obstacleToAvoid && distToObstacle < 5);
+        if (isEmergency) {
+            steerPower *= 1.8;
+        }
+
+        if (Math.abs(diff) > 0.05) {
+            const dir = diff > 0 ? 1 : -1;
+            // Apply steering with a bit of "inertia" by limiting max change per frame
+            const steerAmount = Math.min(Math.abs(diff), dir * steerPower * aiSpeedRatio * dt);
+            ai.offset += dir * Math.abs(steerAmount);
+        }
+
+        if (ai.offset < -2.5) ai.offset = -2.5;
+        if (ai.offset > 2.5) ai.offset = 2.5;
+
+        ai.z += ai.speed * dt;
+    });
+
+    // --- 6. LAP MANAGEMENT ---
+    cars.forEach(car => {
+        // Checkpoint Logic (3 checkpoints per lap)
+        const CHECKPOINTS_PER_LAP = 3;
+        const checkpointInterval = trackLength / CHECKPOINTS_PER_LAP;
+
+        // If car passes the next checkpoint distance
+        if (car.z > car.nextCheckpointIndex * checkpointInterval) {
+            // Only trigger if we haven't finished the lap yet (handled below)
+            if (car.nextCheckpointIndex < CHECKPOINTS_PER_LAP) {
+                callbacks.onCheckpoint(car);
+                car.nextCheckpointIndex++;
+            }
+        }
+
+        if (car.z >= trackLength) {
+            car.z -= trackLength;
+            car.lap++;
+            car.nextCheckpointIndex = 1; // Reset for next lap
+            if (car.lap > totalLaps && !car.finished) {
+                car.finished = true;
+            }
+        }
+        else if (car.z < 0) {
+            car.z += trackLength;
+            car.lap--;
+            // If going backwards across start line, reset to last checkpoint
+            car.nextCheckpointIndex = CHECKPOINTS_PER_LAP;
+        }
+    });
 };
