@@ -449,7 +449,8 @@ export const updateGame = (
 
         // AI Physics Model
         // 1. Acceleration & Braking
-        const lookAhead = 20;
+        // 1. Acceleration & Braking (Look Ahead)
+        const lookAhead = 45; // Increased scan distance (was 20)
         const futureSegment = track[(Math.floor(ai.z / SEGMENT_LENGTH) + lookAhead) % track.length];
         const futureCurve = Math.abs(futureSegment.curve);
 
@@ -459,7 +460,9 @@ export const updateGame = (
 
         let targetSpeed = ai.maxSpeed;
         if (futureCurve > 2) {
-            targetSpeed = ai.maxSpeed * (1 - (futureCurve / 15)); // Slow down for corners
+            // Slow down for corners but maintain at least 25% speed
+            const cornerFactor = 1 - (futureCurve / 8);
+            targetSpeed = ai.maxSpeed * Math.max(0.25, cornerFactor);
         }
 
         // Initialize evasion state if not set
@@ -603,27 +606,27 @@ export const updateGame = (
             const playerSide = player.offset > 0 ? 1 : -1;
             const aiSide = ai.offset > 0 ? 1 : -1;
 
-            // Use time-based oscillation for very rapid movement with EXTREME amplitude
+            // Use time-based oscillation for rapid movement but with SAFER amplitude
             const time = Date.now() / 1000;
-            const rapidOscillation = Math.sin(time * 10) * 4.5; // 10 Hz oscillation, EXTREME amplitude 4.5
+            const rapidOscillation = Math.sin(time * 8) * 1.5; // 8 Hz oscillation, amplitude 1.5 (down from 4.5)
 
             // If player is on same side as AI, move to opposite side immediately
             if (playerSide === aiSide) {
-                targetOffset = -playerSide * 3.5; // Go to EXTREME opposite side
+                targetOffset = -playerSide * 1.8; // Move to safe opposite lane, not extreme off-road (-3.5 -> -1.8)
             } else {
                 // Player is on opposite side, use rapid oscillation to find gap
                 targetOffset = rapidOscillation;
             }
 
-            // Add position-based component for variety with extreme amplitude
-            const positionZigZag = Math.sin(ai.z * 0.1) * 3.5;
+            // Add position-based component for variety with REDUCED amplitude
+            const positionZigZag = Math.sin(ai.z * 0.05) * 1.2;
             targetOffset = (targetOffset + positionZigZag) / 2; // Combine both for unpredictability
         } else if (ai.evasionState === 'overtaking') {
-            // COMMIT TO OVERTAKING SIDE
+            // COMMIT TO OVERTAKING SIDE (Safely)
             if (player.offset > 0) {
-                targetOffset = -2.0; // Pass on the left
+                targetOffset = -1.3; // Pass on the left (Safe lane)
             } else {
-                targetOffset = 2.0; // Pass on the right
+                targetOffset = 1.3; // Pass on the right (Safe lane)
             }
         } else if (ai.evasionState === 'blocked') {
             // Stay behind but prepare to evade
@@ -641,14 +644,25 @@ export const updateGame = (
             }
         }
 
+        // --- OFF-ROAD RECOVERY OVERRIDE ---
+        // If we are slipping off-road (offset > 1.2), force recovery unless dodging immediate death
+        if (!obstacleToAvoid && Math.abs(ai.offset) > 1.4) {
+            targetOffset = 0; // Center the car
+        }
+
+        // Clamping Target Offset for general safety (Keep on road/shoulder)
+        if (!obstacleToAvoid) {
+            targetOffset = Math.max(-1.8, Math.min(1.8, targetOffset));
+        }
+
         const diff = targetOffset - ai.offset;
         let steerPower = PHYSICS.STEERING_SPEED * 0.5;
 
         // Boost steering in evasion and overtaking states
         if (ai.evasionState === 'evading') {
-            steerPower *= 5.0; // ULTRA-aggressive steering during evasion for very rapid movement
+            steerPower *= 2.5; // Increased steering but controlled (down from 5.0)
         } else if (ai.evasionState === 'overtaking') {
-            steerPower *= 2.5; // Decisive steering during overtake
+            steerPower *= 2.0; // Decisive steering during overtake
         }
 
         // Emergency boost for obstacles
