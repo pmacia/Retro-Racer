@@ -3,7 +3,7 @@
  * Manages the Web Audio API context and engine sound synthesis
  */
 
-export type SoundEffect = 'CRASH' | 'BUMP' | 'EXPLOSION' | 'TIRE' | 'BARREL' | 'REV' | 'GO' | 'VICTORY' | 'DEFEAT';
+export type SoundEffect = 'CRASH' | 'BUMP' | 'EXPLOSION' | 'TIRE' | 'BARREL' | 'REV' | 'GO' | 'VICTORY' | 'DEFEAT' | 'HEAL' | 'CHECKPOINT';
 
 interface AudioEngineState {
     context: AudioContext | null;

@@ -202,6 +202,7 @@ const App: React.FC = () => {
             status={status}
             settings={settings}
             trackDefinition={activeTrack}
+            playerName={settings.name}
             onFinish={handleFinish}
             isPaused={status === GameStatus.PAUSED}
             bestSpeed={bestSpeed}
@@ -312,8 +313,8 @@ const App: React.FC = () => {
                       key={level.id}
                       onClick={() => setSettings({ ...settings, difficulty: level.id })}
                       className={`flex-1 py-1 text-xs font-black italic uppercase rounded-md transition-all duration-300 ${settings.difficulty === level.id
-                          ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]'
-                          : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
+                        ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]'
+                        : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
                         }`}
                     >
                       {level.label}
@@ -333,8 +334,8 @@ const App: React.FC = () => {
                         key={lap}
                         onClick={() => setSettings({ ...settings, laps: lap })}
                         className={`aspect-square flex items-center justify-center font-bold text-xs rounded border transition-all ${settings.laps === lap
-                            ? 'bg-pink-600 border-pink-400 text-white shadow-[0_0_10px_rgba(236,72,153,0.5)]'
-                            : 'bg-gray-900 border-gray-700 text-gray-500 hover:border-gray-500'
+                          ? 'bg-pink-600 border-pink-400 text-white shadow-[0_0_10px_rgba(236,72,153,0.5)]'
+                          : 'bg-gray-900 border-gray-700 text-gray-500 hover:border-gray-500'
                           }`}
                       >
                         {lap}

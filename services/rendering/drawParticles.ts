@@ -1,40 +1,103 @@
-/**
- * Draw Particles
- * Renders particle effects (smoke, fire, debris, sparks, fireworks)
- */
+import { project } from '../gameEngine';
+import { STEP } from '../../constants';
 
 export interface Particle {
-    x: number;
-    y: number;
+    worldX: number;
+    worldY: number;
+    worldZ: number;
     vx: number;
     vy: number;
+    vz: number;
     life: number;
     size: number;
-    color: string;
-    type: 'SMOKE' | 'FIRE' | 'DEBRIS' | 'SPARK' | 'LEAF' | 'FIREWORK';
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+    type: 'SMOKE' | 'FIRE' | 'DEBRIS' | 'SPARK' | 'LEAF' | 'FIREWORK' | 'EMBER' | 'WATER' | 'OIL';
+    angle?: number;
+    spin?: number;
+    phase?: number;     // For oscillation
+    amplitude?: number; // For oscillation
+}
+
+// Module-level state
+let particles: Particle[] = [];
+
+/**
+ * Clear all particles
+ */
+export function clearParticles(): void {
+    particles = [];
 }
 
 /**
  * Update all particles (physics)
  */
-export function updateParticles(particles: Particle[]): void {
+export function updateParticles(): void {
     for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
-        p.x += p.vx;
-        p.y += p.vy;
+
+        // Apply velocity in world space
+        p.worldX += p.vx;
+        p.worldY += p.vy;
+        p.worldZ += p.vz;
+
+        // Apply gravity to specific types
+        if (p.type === 'WATER' || p.type === 'OIL' || p.type === 'DEBRIS' || p.type === 'FIREWORK') {
+            p.vy -= 0.8; // Gravity
+        }
+
+        // Apply oscillation (sine wave drift)
+        if (p.phase !== undefined && p.amplitude !== undefined) {
+            p.worldX += Math.sin(p.phase) * p.amplitude;
+            p.phase += 0.15; // Speed of oscillation
+        }
+
+        // Apply rotation
+        if (p.angle !== undefined && p.spin !== undefined) {
+            p.angle += p.spin;
+        }
 
         if (p.type === 'DEBRIS' || p.type === 'LEAF') {
-            p.vy += 0.5; // Gravity
+            p.vy -= 0.5; // Gravity
             p.life -= 0.03;
         } else if (p.type === 'SPARK') {
-            p.vy += 0.2;
+            p.vy -= 0.2;
             p.life -= 0.05;
         } else if (p.type === 'FIREWORK') {
-            p.vy += 0.1;
-            p.life -= 0.02;
+            p.vy += 2.0; // Strong buoyancy
+            p.vx *= 0.98;
+            p.vy *= 0.98;
+            p.vz *= 0.98;
+            p.life -= 0.012;
+        } else if (p.type === 'SMOKE' || p.type === 'FIRE') {
+            // Buoyancy: upward acceleration
+            p.vy += 1.2;
+
+            // Air resistance (stronger for smoke to make it lose forward speed faster)
+            const friction = p.type === 'SMOKE' ? 0.92 : 0.95;
+            p.vx *= friction;
+            p.vy *= friction;
+            p.vz *= friction;
+
+            // Non-linear expansion: faster expansion for softer look
+            const growthRate = 1.0 + (p.life * 0.05);
+            p.size *= growthRate;
+
+            // Horizontal jitter (randomness on top of oscillation)
+            p.vx += (Math.random() - 0.5) * 1.0;
+            p.vz += (Math.random() - 0.5) * 1.0;
+
+            // Slower decay for smoke
+            p.life -= (p.type === 'SMOKE' ? 0.006 : 0.012);
+        } else if (p.type === 'EMBER') {
+            p.vy += 0.5;
+            p.vx += (Math.random() - 0.5) * 1.0;
+            p.life -= 0.01;
         } else {
             p.life -= 0.02;
-            p.size *= 1.02; // Expand
+            p.size *= 1.02;
         }
 
         if (p.life <= 0) {
@@ -46,33 +109,96 @@ export function updateParticles(particles: Particle[]): void {
 /**
  * Draw all particles
  */
-export function drawParticles(ctx: CanvasRenderingContext2D, particles: Particle[]): void {
+export function drawParticles(
+    ctx: CanvasRenderingContext2D,
+    cameraX: number,
+    cameraY: number,
+    cameraZ: number,
+    cameraDepth: number,
+    width: number,
+    height: number,
+    roadWidth: number
+): void {
     for (const p of particles) {
-        ctx.beginPath();
+        // Project world to screen
+        const screen = project(
+            { x: p.worldX, y: p.worldY, z: p.worldZ },
+            cameraX, cameraY, cameraZ,
+            cameraDepth, width, height, roadWidth
+        );
+
+        // Don't draw if behind camera or too far
+        if (p.worldZ < cameraZ || p.worldZ > cameraZ + 15000) continue;
+
+        const size = p.size * (screen.w / roadWidth); // Scale size by perspective
+        if (size < 0.5) continue;
+
+        ctx.save();
 
         if (p.type === 'DEBRIS' || p.type === 'LEAF') {
-            ctx.rect(p.x, p.y, p.size, p.size);
+            ctx.translate(screen.x, screen.y);
+            if (p.angle !== undefined) ctx.rotate(p.angle);
+            ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},${p.a * p.life * 0.8})`;
+            ctx.fillRect(-size / 2, -size / 2, size, size);
         } else if (p.type === 'SPARK') {
-            // Draw as a streak
-            ctx.moveTo(p.x, p.y);
-            ctx.lineTo(p.x - p.vx * 2, p.y - p.vy * 2);
-            ctx.strokeStyle = `rgba(255,255,0,${p.life})`;
+            ctx.beginPath();
+            ctx.moveTo(screen.x, screen.y);
+            ctx.lineTo(screen.x - p.vx * (screen.w / roadWidth) * 2, screen.y - p.vy * (screen.w / roadWidth) * 2);
+            ctx.strokeStyle = `rgba(${p.r},${p.g},${p.b},${p.a * p.life})`;
             ctx.lineWidth = 2;
             ctx.stroke();
-            continue;
+        } else if (p.type === 'SMOKE') {
+            // Opacity control: respect base alpha p.a, apply fade-in/out
+            const fadeIn = Math.min(1.0, (2.5 - p.life) * 4);
+            const alpha = p.a * Math.min(0.5, p.life * 0.3) * fadeIn; // Lowered global multiplier to 0.5
+
+            // Size capping in screen space
+            const cappedSize = Math.min(size, 200);
+
+            const grad = ctx.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, cappedSize);
+            grad.addColorStop(0, `rgba(${p.r},${p.g},${p.b},${alpha})`);
+            grad.addColorStop(0.4, `rgba(${p.r},${p.g},${p.b},${alpha * 0.2})`); // Softer outer edge
+            grad.addColorStop(1, `rgba(${p.r},${p.g},${p.b},0)`);
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, cappedSize, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (p.type === 'FIRE') {
+            const alpha = Math.min(0.8, p.life * 2);
+            const cappedSize = Math.min(size, 100);
+
+            const grad = ctx.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, cappedSize);
+            grad.addColorStop(0, `rgba(255, 255, 200, ${alpha})`);
+            grad.addColorStop(0.3, `rgba(${p.r},${p.g},${p.b},${alpha})`);
+            grad.addColorStop(1, `rgba(255, 0, 0, 0)`);
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, cappedSize, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (p.type === 'EMBER' || p.type === 'FIREWORK') {
+            ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},${p.a})`;
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (p.type === 'WATER') {
+            ctx.fillStyle = `rgba(100, 150, 255, ${p.a * 0.6})`;
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (p.type === 'OIL') {
+            ctx.fillStyle = `rgba(40, 20, 10, ${p.a * 0.8})`;
+            ctx.beginPath();
+            // Irregular blob for oil
+            ctx.ellipse(screen.x, screen.y, size, size * 0.6, p.angle || 0, 0, Math.PI * 2);
+            ctx.fill();
         } else {
-            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},${Math.min(0.8, p.life * 0.8)})`;
+            ctx.fill();
         }
 
-        if (p.type === 'FIRE') {
-            ctx.fillStyle = `${p.color}${p.life})`;
-        } else if (p.type === 'FIREWORK') {
-            ctx.fillStyle = `${p.color}${p.life})`;
-        } else {
-            ctx.fillStyle = `${p.color}${p.life * 0.8})`;
-        }
-
-        ctx.fill();
+        ctx.restore();
     }
 }
 
@@ -80,44 +206,116 @@ export function drawParticles(ctx: CanvasRenderingContext2D, particles: Particle
  * Spawn damage particles (smoke/fire based on damage level)
  */
 export function spawnDamageParticles(
-    particles: Particle[],
-    x: number,
-    y: number,
+    worldX: number,
+    worldY: number,
+    worldZ: number,
     damage: number,
-    scale: number
+    carSpeed: number = 0
 ): void {
-    if (damage < 20) return;
+    // Start very subtle smoke at 5% damage
+    if (damage < 5) return;
 
-    let chance = 0.1;
-    if (damage > 50) chance = 0.3;
-    if (damage > 90) chance = 0.8;
-    if (Math.random() > chance) return;
+    // Normalize damage for scaling (0.0 to 1.0)
+    const d = Math.min(1.0, damage / 100);
 
-    const isCritical = damage > 90;
-    const isHigh = damage > 60;
+    // 1. PROBABILITY-BASED SPAWNING
+    // Much lower chance at start (0.05) increasing to 0.9 at max damage
+    const spawnChance = 0.05 + (d * 0.85);
+    if (Math.random() > spawnChance) return;
 
-    particles.push({
-        x: x + (Math.random() * 20 - 10) * scale,
-        y: y - (10 * scale),
-        vx: (Math.random() * 2 - 1) * scale,
-        vy: -(Math.random() * 3 + 1) * scale,
-        life: 1.0,
-        size: (Math.random() * 10 + 5) * scale,
-        color: isHigh ? 'rgba(20,20,20,' : 'rgba(150,150,150,',
-        type: 'SMOKE'
-    });
+    // 2. DENSITY SCALING
+    // Very low density for a professional, subtle look
+    const density = 1 + (d > 0.8 ? Math.floor((d - 0.8) * 2) : 0);
 
-    if (isCritical && Math.random() > 0.5) {
+    for (let i = 0; i < density; i++) {
+        // 3. STRICT COLOR & OPACITY RAMP (Subtle alpha values)
+        let r = 255, g = 255, b = 255, a = 0.1;
+
+        if (d < 0.3) {
+            // 5-30%: Pure White, barely visible
+            a = 0.04 + (d / 0.3) * 0.04;
+        } else if (d < 0.6) {
+            // 30-60%: Light Gray
+            const ratio = (d - 0.3) / 0.3;
+            const gray = Math.floor(200 - (ratio * 80));
+            r = g = b = gray;
+            a = 0.08 + (ratio * 0.07);
+        } else if (d < 0.85) {
+            // 60-85%: Dark Gray
+            const ratio = (d - 0.6) / 0.25;
+            const gray = Math.floor(80 - (ratio * 40));
+            r = g = b = gray;
+            a = 0.15 + (ratio * 0.1);
+        } else {
+            // >85%: Black (Transparent enough to see through)
+            r = g = b = 40;
+            a = 0.3;
+        }
+
+        // 4. CONTINUOUS SIZE SCALING
+        const baseSize = 50 + (d * 150);
+        const size = baseSize * (0.8 + Math.random() * 0.8);
+
+        // Velocity inheritance: inherit car's speed in Z (Corrected units: units/sec to units/frame)
+        const vz = (carSpeed * STEP) + (Math.random() * 2 - 1);
+
         particles.push({
-            x: x + (Math.random() * 15 - 7.5) * scale,
-            y: y - (10 * scale),
-            vx: (Math.random() * 1 - 0.5) * scale,
-            vy: -(Math.random() * 2 + 0.5) * scale,
-            life: 0.5,
-            size: (Math.random() * 8 + 4) * scale,
-            color: 'rgba(255,' + Math.floor(Math.random() * 150) + ',0,',
-            type: 'FIRE'
+            worldX: worldX + (Math.random() * 30 - 15),
+            worldY: worldY + 10,
+            worldZ: worldZ + 20, // Small local offset, renderView handles the hood offset
+            vx: (Math.random() * 4 - 2),
+            vy: (Math.random() * 3 + 2), // Upward
+            vz: vz,
+            life: 1.2 + Math.random() * 1.5,
+            size: size,
+            r, g, b, a,
+            type: 'SMOKE',
+            angle: Math.random() * Math.PI * 2,
+            spin: (Math.random() - 0.5) * 0.1,
+            phase: Math.random() * Math.PI * 2,
+            amplitude: 1.5 + Math.random() * 2.0 // Slightly reduced oscillation for better attachment
         });
+
+        // 5. FIRE SPAWNING (Starts at 60% damage)
+        if (d > 0.6) {
+            const fireChance = (d - 0.6) * 0.6; // Up to 24% chance
+            if (Math.random() < fireChance) {
+                const fireG = Math.floor(200 - (d * 150));
+                particles.push({
+                    worldX: worldX + (Math.random() * 20 - 10),
+                    worldY: worldY + 15,
+                    worldZ: worldZ + 40,
+                    vx: (Math.random() * 3 - 1.5),
+                    vy: (Math.random() * 5 + 3),
+                    vz: vz + (Math.random() * 2 - 1),
+                    life: 0.5 + Math.random() * 0.5,
+                    size: size * 0.7,
+                    r: 255, g: fireG, b: 0, a: 0.8,
+                    type: 'FIRE',
+                    phase: Math.random() * Math.PI * 2,
+                    amplitude: 0.8 + Math.random() * 1.5
+                });
+            }
+        }
+
+        // 6. EMBERS (Starts at 85% damage)
+        if (d > 0.85) {
+            const emberChance = (d - 0.85) * 3; // Up to 45% chance
+            if (Math.random() < emberChance) {
+                particles.push({
+                    worldX: worldX + (Math.random() * 30 - 15),
+                    worldY: worldY + 40,
+                    worldZ: worldZ + 150,
+                    vx: (Math.random() * 15 - 7.5),
+                    vy: (Math.random() * 15 + 10),
+                    vz: vz + (Math.random() * 5 - 2.5),
+                    life: 1.2 + Math.random() * 1.8,
+                    size: (Math.random() * 12 + 4),
+                    r: 255, g: 200, b: 0, a: 1.0,
+                    type: 'EMBER'
+                });
+            }
+        }
     }
 }
 
@@ -125,37 +323,43 @@ export function spawnDamageParticles(
  * Spawn collision particles (debris/sparks)
  */
 export function spawnCollisionParticles(
-    particles: Particle[],
-    x: number,
-    y: number,
-    type: 'TREE' | 'BARREL' | 'TIRE' | 'DEBRIS' | 'SPARK'
+    worldX: number,
+    worldY: number,
+    worldZ: number,
+    type: 'TREE' | 'BARREL' | 'TIRE' | 'DEBRIS' | 'SPARK' | 'BOULDER'
 ): void {
-    const count = 10;
-    let color = 'rgba(100,100,100,';
+    const count = 15;
+    let r = 100, g = 100, b = 100, a = 0.8;
     let particleType: Particle['type'] = 'DEBRIS';
 
     if (type === 'BARREL') {
-        color = 'rgba(185,28,28,';
+        r = 185; g = 28; b = 28; // Red
     } else if (type === 'TIRE') {
-        color = 'rgba(30,30,30,';
+        r = 30; g = 30; b = 30; // Black
     } else if (type === 'SPARK') {
-        color = 'rgba(255,255,0,';
+        r = 255; g = 255; b = 0; // Yellow
         particleType = 'SPARK';
     } else if (type === 'TREE') {
-        color = 'rgba(20,100,20,';
+        r = 20; g = 100; b = 20; // Green
         particleType = 'LEAF';
+    } else if (type === 'BOULDER') {
+        r = 120; g = 120; b = 120; // Gray
     }
 
     for (let i = 0; i < count; i++) {
         particles.push({
-            x: x,
-            y: y,
-            vx: (Math.random() * 10 - 5) * (particleType === 'SPARK' ? 2 : 1),
-            vy: -(Math.random() * 10 + 5),
-            life: 1.0,
-            size: Math.random() * 5 + 3,
-            color: color,
-            type: particleType
+            worldX: worldX,
+            worldY: worldY,
+            worldZ: worldZ,
+            vx: (Math.random() * 40 - 20),
+            vy: (Math.random() * 30 + 10),
+            vz: (Math.random() * 40 - 20),
+            life: 1.0 + Math.random() * 0.5,
+            size: Math.random() * 30 + 20,
+            r, g, b, a,
+            type: particleType,
+            angle: Math.random() * Math.PI * 2,
+            spin: (Math.random() - 0.5) * 0.2
         });
     }
 }
@@ -164,24 +368,62 @@ export function spawnCollisionParticles(
  * Spawn fireworks (for victory)
  */
 export function spawnFireworks(
-    particles: Particle[],
-    width: number,
-    height: number
+    worldX: number,
+    worldY: number,
+    worldZ: number
 ): void {
-    const x = Math.random() * width;
-    const y = Math.random() * (height / 2);
-    const color = `rgba(${Math.floor(Math.random() * 255)},${Math.floor(Math.random() * 255)},${Math.floor(Math.random() * 255)},`;
+    const colors = [
+        { r: 255, g: 50, b: 50 },   // Red
+        { r: 50, g: 255, b: 50 },   // Green
+        { r: 50, g: 100, b: 255 },  // Blue
+        { r: 255, g: 255, b: 50 },  // Yellow
+        { r: 255, g: 50, b: 255 }   // Magenta
+    ];
+    const color = colors[Math.floor(Math.random() * colors.length)];
 
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 60; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 5 + Math.random() * 15;
         particles.push({
-            x: x,
-            y: y,
-            vx: (Math.random() - 0.5) * 10,
-            vy: (Math.random() - 0.5) * 10,
-            life: 1.5,
-            size: Math.random() * 4 + 2,
-            color: color,
+            worldX,
+            worldY,
+            worldZ,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed + 10,
+            vz: (Math.random() - 0.5) * 10,
+            life: 1.5 + Math.random() * 1.5,
+            size: 15 + Math.random() * 15,
+            r: color.r,
+            g: color.g,
+            b: color.b,
+            a: 1.0,
             type: 'FIREWORK'
+        });
+    }
+}
+
+/**
+ * Spawn obstacle particles (water/oil splashes)
+ */
+export function spawnObstacleParticles(
+    worldX: number,
+    worldZ: number,
+    type: 'PUDDLE' | 'OIL'
+): void {
+    const count = 12;
+    for (let i = 0; i < count; i++) {
+        particles.push({
+            worldX: worldX + (Math.random() * 100 - 50),
+            worldY: 10,
+            worldZ: worldZ,
+            vx: (Math.random() * 20 - 10),
+            vy: (Math.random() * 15 + 5),
+            vz: (Math.random() * 10 - 5),
+            life: 0.6 + Math.random() * 0.4,
+            size: 10 + Math.random() * 20,
+            r: 0, g: 0, b: 0, a: 1.0, // Colors handled in drawParticles
+            type: type === 'PUDDLE' ? 'WATER' : 'OIL',
+            angle: Math.random() * Math.PI * 2
         });
     }
 }
