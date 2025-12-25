@@ -216,9 +216,10 @@ export const updateGame = (
     dt: number,
     totalLaps: number,
     callbacks: {
-        onObstacleHit: (type: string, worldX: number, worldY: number, worldZ: number) => void;
+        onObstacleHit: (car: Car, type: string, worldX: number, worldY: number, worldZ: number) => void;
         onCarHit: (type: 'REAR' | 'SIDE', severity: number, worldX: number, worldY: number, worldZ: number) => void;
         onCheckpoint: (car: Car) => void;
+        onLap: (car: Car) => void;
     }
 ) => {
     const player = cars[0];
@@ -286,9 +287,16 @@ export const updateGame = (
                                 segment.sprites.splice(i, 1);
                             }
 
-                            if (stopCar) car.speed = 0;
+                            if (stopCar) {
+                                car.speed = 0;
+                                // Bounce back to avoid stuck loops
+                                car.z -= 300;
+                                // Push away from obstacle
+                                const pushDir = car.offset > sprite.offset ? 1 : -1;
+                                car.offset += pushDir * 0.5;
+                            }
 
-                            callbacks.onObstacleHit(sprite.source, sprite.offset * ROAD_WIDTH, 0, segZ);
+                            callbacks.onObstacleHit(car, sprite.source, sprite.offset * ROAD_WIDTH, 0, segZ);
 
                             if (car.damage >= DAMAGE.MAX) car.exploded = true;
                         }
@@ -703,6 +711,7 @@ export const updateGame = (
             car.z -= trackLength;
             car.lap++;
             car.nextCheckpointIndex = 1; // Reset for next lap
+            callbacks.onLap(car);
             if (car.lap > totalLaps && !car.finished) {
                 car.finished = true;
             }

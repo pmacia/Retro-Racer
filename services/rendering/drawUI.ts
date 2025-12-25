@@ -35,18 +35,34 @@ export function drawMiniMap(
     ctx.save();
     ctx.translate(x, y);
 
-    // Background
+    const radius = 16;
+
+    // Helper function to draw rounded rect path
+    const drawRoundedRect = (c: CanvasRenderingContext2D, s: number, r: number) => {
+        c.beginPath();
+        c.moveTo(r, 0);
+        c.lineTo(s - r, 0);
+        c.arcTo(s, 0, s, r, r);
+        c.lineTo(s, s - r);
+        c.arcTo(s, s, s - r, s, r);
+        c.lineTo(r, s);
+        c.arcTo(0, s, 0, s - r, r);
+        c.lineTo(0, r);
+        c.arcTo(0, 0, r, 0, r);
+        c.closePath();
+    };
+
+
+    // Enable local clipping for the minimap window
+    drawRoundedRect(ctx, size, radius);
+
+    // Draw background
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.strokeStyle = 'rgba(6, 182, 212, 0.3)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    if (typeof (ctx as any).roundRect === 'function') {
-        (ctx as any).roundRect(0, 0, size, size, 8);
-    } else {
-        ctx.rect(0, 0, size, size);
-    }
     ctx.fill();
-    ctx.stroke();
+
+    // Save context for clipping
+    ctx.save();
+    ctx.clip();
 
     // Center track
     const offsetX = (size - w * scale) / 2 - minX * scale;
@@ -86,6 +102,15 @@ export function drawMiniMap(
         ctx.strokeStyle = 'white';
         ctx.stroke();
     }
+
+    // Restore context (removes clipping)
+    ctx.restore();
+
+    // Draw Border on top
+    drawRoundedRect(ctx, size, radius);
+    ctx.strokeStyle = 'rgba(6, 182, 212, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
 
     ctx.restore();
 }
