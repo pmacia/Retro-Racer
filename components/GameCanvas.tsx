@@ -1,15 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { GameStatus, PlayerSettings, Car, Segment, TrackDefinition, OilStain } from '../types';
-import { createTrack, createCars, updateGame } from '../services/gameEngine';
-import { WIDTH, HEIGHT } from '../constants';
+import { GameStatus, PlayerSettings, TrackDefinition } from '../types';
+
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Gauge, Timer, Flag, Map as MapIcon, Skull, Volume2, VolumeX } from 'lucide-react';
-import { startEngine, stopEngine, setMuted, isEngineRunning, updateEngine } from '../services/audio/audioEngine';
-import { playSound } from '../services/audio/soundEffects';
-import { updateParticles, clearParticles, spawnCollisionParticles, spawnDamageParticles, spawnObstacleParticles } from '../services/rendering/drawParticles';
-import { renderView, renderMap } from '../services/rendering/renderingService';
-import { createInputHandler } from '../services/input/inputHandler';
-import { updateHUD } from '../services/rendering/hudService';
-import { startCountdown, handleFinishSequence } from '../services/game/gameLifecycle';
+import { Game } from '../core/Game';
 
 interface GameCanvasProps {
     status: GameStatus;
@@ -23,25 +16,9 @@ interface GameCanvasProps {
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefinition, playerName, onFinish, isPaused, bestSpeed }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const gameRef = useRef<Game | null>(null);
 
-    // Game State
-    const carsRef = useRef<Car[]>([]);
-    const trackRef = useRef<Segment[]>([]);
-    const inputRef = useRef({ left: false, right: false, up: false, down: false });
-    const startTimeRef = useRef<number>(0);
-    const frameIdRef = useRef<number>(0);
-    const lastTimeRef = useRef<number>(0);
-    const cameraViewRef = useRef<number>(0); // 0 = Player, 1 = Rival
-
-    // Finishing Sequence State
-    const finishingSeqRef = useRef<{
-        active: boolean;
-        startTime: number;
-        resultProcessed: boolean;
-        winner?: boolean;
-    }>({ active: false, startTime: 0, resultProcessed: false });
-
-    // HUD Refs
+    // HUD Refs to pass to Game Engine
     const speedRef = useRef<HTMLSpanElement>(null);
     const timeRef = useRef<HTMLSpanElement>(null);
     const lapRef = useRef<HTMLSpanElement>(null);
@@ -49,326 +26,90 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
     const rivalDamageRef = useRef<HTMLDivElement>(null);
 
     const [countdown, setCountdown] = useState<number>(3);
-    const isRacingRef = useRef<boolean>(false);
-    const [viewMode, setViewMode] = useState<'3D' | 'MAP'>('3D');
-    const [activeView, setActiveView] = useState<number>(0); // 0=Player, 1=Rival, 2=Split
-    const oilStainsRef = useRef<OilStain[]>([]);
+    const [activeView, setActiveView] = useState<number>(0);
     const [isMuted, setIsMuted] = useState<boolean>(false);
 
     // Toggle mute handler
     const toggleMute = () => {
         setIsMuted(prev => {
             const newState = !prev;
-            setMuted(newState);
+            if (gameRef.current) gameRef.current.setMuted(newState);
             return newState;
         });
     };
 
-    // Initial Setup & Cleanup
+    const prevStatusRef = useRef<GameStatus>(status);
+
+    // Initialize Game Engine and handle Resize
     useEffect(() => {
-        return () => {
-            stopEngine();
-        };
-    }, []);
+        if (!canvasRef.current) return;
 
-    useEffect(() => {
-        if (status === GameStatus.PLAYING && carsRef.current.length === 0) {
-            carsRef.current = createCars(settings.color, settings.name, settings.difficulty, bestSpeed);
-            trackRef.current = createTrack(trackDefinition);
-            clearParticles();
-            setCountdown(3);
-            isRacingRef.current = false;
-            finishingSeqRef.current = { active: false, startTime: 0, resultProcessed: false };
-            stopEngine();
+        // Instantiate Game once
+        const game = new Game(
+            canvasRef.current,
+            { speed: speedRef, time: timeRef, lap: lapRef, damage: damageRef, rivalDamage: rivalDamageRef },
+            onFinish,
+            setCountdown // Connect countdown callback
+        );
+        game.onViewChange = setActiveView;
+        gameRef.current = game;
 
-            const interval = startCountdown(setCountdown, () => {
-                isRacingRef.current = true;
-                startTimeRef.current = Date.now();
-                lastTimeRef.current = Date.now();
-            });
-
-            return () => clearInterval(interval);
-        } else if (status === GameStatus.MENU || status === GameStatus.GAME_OVER) {
-            carsRef.current = [];
-            trackRef.current = [];
-            clearParticles();
-            isRacingRef.current = false;
-            finishingSeqRef.current = { active: false, startTime: 0, resultProcessed: false };
-            stopEngine();
-            oilStainsRef.current = [];
-        }
-    }, [status, settings, bestSpeed, trackDefinition]);
-
-    // Input Handling
-    const inputHandler = useRef(createInputHandler(inputRef, cameraViewRef, setActiveView, () => finishingSeqRef.current.active));
-
-    useEffect(() => {
-        const handler = inputHandler.current;
-        window.addEventListener('keydown', handler.handleKeyDown);
-        window.addEventListener('keyup', handler.handleKeyUp);
-        return () => {
-            window.removeEventListener('keydown', handler.handleKeyDown);
-            window.removeEventListener('keyup', handler.handleKeyUp);
-        };
-    }, []);
-
-    const handleTouchInput = (action: 'up' | 'down' | 'left' | 'right', isPressed: boolean) => {
-        inputHandler.current.handleTouchInput(action, isPressed);
-    };
-
-    // Main Loop
-    useEffect(() => {
-        if (status !== GameStatus.PLAYING) {
-            if (isEngineRunning()) stopEngine();
-            return;
-        }
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d', { alpha: false });
-        if (!ctx) return;
-
-        const render = () => {
-            try {
-                if (trackRef.current.length === 0 || carsRef.current.length === 0) {
-                    frameIdRef.current = requestAnimationFrame(render);
-                    return;
+        // Resize Handler
+        const handleResize = () => {
+            if (canvasRef.current && gameRef.current) {
+                const parent = canvasRef.current.parentElement;
+                if (parent) {
+                    canvasRef.current.width = parent.clientWidth;
+                    canvasRef.current.height = parent.clientHeight;
+                    gameRef.current.resize(parent.clientWidth, parent.clientHeight);
                 }
-
-                if (isPaused) {
-                    if (isEngineRunning()) stopEngine();
-                    frameIdRef.current = requestAnimationFrame(render);
-                    return;
-                }
-                if (isRacingRef.current && !isEngineRunning() && !finishingSeqRef.current.active && !carsRef.current[0]?.exploded) {
-                    startEngine();
-                }
-
-                const now = Date.now();
-                const dt = Math.min(1, (now - lastTimeRef.current) / 1000);
-                lastTimeRef.current = now;
-
-                const player = carsRef.current[0];
-                const rival = carsRef.current[1];
-
-                const cameraTargetIndex = cameraViewRef.current < carsRef.current.length ? cameraViewRef.current : 0;
-                const cameraCar = carsRef.current[cameraTargetIndex];
-
-                if (!player || !cameraCar) {
-                    frameIdRef.current = requestAnimationFrame(render);
-                    return;
-                }
-
-                const finishConditionMet = carsRef.current.some(c => c.finished) || player.exploded;
-
-                if (finishConditionMet || finishingSeqRef.current.active) {
-                    const finished = handleFinishSequence(
-                        player,
-                        rival,
-                        finishingSeqRef,
-                        startTimeRef,
-                        trackRef.current,
-                        settings.laps,
-                        settings.name,
-                        onFinish
-                    );
-                    if (finished) return;
-                    if (finishConditionMet) {
-                        inputRef.current = { up: false, down: false, left: false, right: false };
-                    }
-
-                    // Clear oil stains on finish for clear visibility
-                    if (oilStainsRef.current.length > 0) {
-                        oilStainsRef.current = [];
-                    }
-                }
-
-                if (isRacingRef.current) {
-                    updateParticles();
-
-                    // Oil stain decay (independent for each stain)
-                    if (oilStainsRef.current.length > 0) {
-                        // Decay all stains
-                        oilStainsRef.current.forEach(stain => {
-                            stain.alpha = Math.max(0, stain.alpha - dt * 0.15); // Slower decay for longer duration
-                        });
-                        // Remove expired stains
-                        oilStainsRef.current = oilStainsRef.current.filter(stain => stain.alpha > 0);
-                    }
-
-                    // Spawn damage particles for all cars
-                    carsRef.current.forEach((car, index) => {
-                        if (car.damage < 5 && !car.exploded) return;
-
-                        if (index === 0) {
-                            // Player car: apply visual offset for 2D sprite alignment
-                            // Using moderate offsets for better high-speed visibility
-                            const zOffset = 400;
-                            const yOffset = 100;
-                            spawnDamageParticles(car.offset * 2000, yOffset, car.z + zOffset, car.exploded ? 100 : car.damage, car.speed);
-                        } else {
-                            // AI cars: standard world coordinates
-                            spawnDamageParticles(car.offset * 2000, 0, car.z, car.exploded ? 100 : car.damage, car.speed);
-                        }
-                    });
-
-                    // Update engine sound based on player speed
-                    updateEngine(player.speed / player.maxSpeed);
-
-                    updateGame(
-                        carsRef.current,
-                        trackRef.current,
-                        inputRef.current,
-                        dt,
-                        settings.laps,
-                        {
-                            onObstacleHit: (type, worldX, worldY, worldZ) => {
-                                if (type === 'TREE') { playSound('CRASH'); spawnCollisionParticles(worldX, worldY, worldZ, 'TREE'); }
-                                else if (type === 'BOULDER') { playSound('CRASH'); spawnCollisionParticles(worldX, worldY, worldZ, 'BOULDER'); }
-                                else if (type === 'BARREL') { playSound('BARREL'); spawnCollisionParticles(worldX, worldY, worldZ, 'BARREL'); }
-                                else if (type === 'TIRE') { playSound('TIRE'); spawnCollisionParticles(worldX, worldY, worldZ, 'TIRE'); }
-                                else if (type === 'REPAIR') { playSound('HEAL'); }
-                                else if (type === 'PUDDLE') { spawnObstacleParticles(worldX, worldZ, 'PUDDLE'); }
-                                else if (type === 'OIL') {
-                                    spawnObstacleParticles(worldX, worldZ, 'OIL');
-                                    // Add new stain without removing old ones
-                                    oilStainsRef.current.push({
-                                        alpha: 1.0,
-                                        seed: Math.random()
-                                    });
-                                }
-                                else { spawnCollisionParticles(worldX, worldY, worldZ, 'DEBRIS'); }
-                            },
-                            onCarHit: (_type, severity, worldX, worldY, worldZ) => {
-                                if (severity > 0.8) playSound('CRASH');
-                                else playSound('BUMP');
-                                spawnCollisionParticles(worldX, worldY, worldZ, 'SPARK');
-                            },
-                            onCheckpoint: (car) => {
-                                if (car.isPlayer) playSound('CHECKPOINT');
-                            }
-                        }
-                    );
-
-                    updateHUD(cameraCar, startTimeRef.current, settings.laps, activeView, carsRef.current, {
-                        speed: speedRef,
-                        time: timeRef,
-                        lap: lapRef,
-                        damage: damageRef,
-                        rivalDamage: rivalDamageRef
-                    });
-                }
-
-                // --- RENDERING ---
-                ctx.clearRect(0, 0, WIDTH, HEIGHT);
-
-                if (viewMode === 'MAP') {
-                    renderMap(ctx, carsRef.current, trackRef.current, WIDTH, HEIGHT);
-                } else {
-                    if (activeView === 2) {
-                        renderView(ctx, player, carsRef.current, trackRef.current, 0, 0, WIDTH / 2, HEIGHT, isRacingRef.current, oilStainsRef.current);
-                        if (rival) {
-                            renderView(ctx, rival, carsRef.current, trackRef.current, WIDTH / 2, 0, WIDTH / 2, HEIGHT, isRacingRef.current, []);
-                        }
-                        ctx.fillStyle = '#000';
-                        ctx.fillRect(WIDTH / 2 - 2, 0, 4, HEIGHT);
-                    } else {
-                        renderView(ctx, cameraCar, carsRef.current, trackRef.current, 0, 0, WIDTH, HEIGHT, isRacingRef.current, cameraTargetIndex === 0 ? oilStainsRef.current : []);
-                    }
-
-                    // --- MINI-MAP OVERLAY ---
-                    const mapSize = 150; // Slightly larger
-                    const padding = 20;
-                    ctx.save();
-                    // Move to top-left, just below the HUD
-                    ctx.translate(padding, 130);
-                    renderMap(ctx, carsRef.current, trackRef.current, mapSize, mapSize, true);
-                    ctx.restore();
-                }
-
-                if (!isRacingRef.current && countdown > 0) {
-                    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                    ctx.fillRect(0, 0, WIDTH, HEIGHT);
-                    ctx.fillStyle = '#eab308';
-                    ctx.font = 'bold 200px sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.strokeStyle = 'white';
-                    ctx.lineWidth = 8;
-                    ctx.strokeText(countdown.toString(), WIDTH / 2, HEIGHT / 2);
-                    ctx.fillText(countdown.toString(), WIDTH / 2, HEIGHT / 2);
-                } else if (!isRacingRef.current && countdown === 0) {
-                    ctx.fillStyle = '#22c55e';
-                    ctx.font = 'bold 200px sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.strokeStyle = 'white';
-                    ctx.lineWidth = 8;
-                    ctx.strokeText("YA!", WIDTH / 2, HEIGHT / 2);
-                    ctx.fillText("YA!", WIDTH / 2, HEIGHT / 2);
-                }
-
-                // --- FINAL ANIMATIONS (Victory / Defeat) ---
-                if (finishingSeqRef.current.active) {
-                    const timeSinceFinish = (Date.now() - finishingSeqRef.current.startTime) / 1000;
-                    const player = carsRef.current[0];
-                    const rival = carsRef.current[1];
-                    const playerDead = player.exploded;
-
-                    if (player.finished && !playerDead) {
-                        // Fireworks are handled in handleFinishSequence
-                    }
-
-                    let text = "FIN DE CARRERA";
-                    let color = "#fff";
-
-                    if (playerDead) {
-                        text = "¡COCHE AVERIADO!";
-                        color = "#ef4444";
-                    } else if (player.finished) {
-                        // Determine winner once and store it
-                        if (finishingSeqRef.current.winner === undefined) {
-                            const isWinner = !rival || !rival.finished || rival.lapTime > player.lapTime;
-                            finishingSeqRef.current.winner = isWinner;
-                        }
-
-                        const isWinner = finishingSeqRef.current.winner;
-                        text = isWinner ? "¡VICTORIA!" : "¡DERROTA!";
-                        color = isWinner ? "#22c55e" : "#ef4444";
-                    }
-
-                    ctx.save();
-                    const scale = 1 + Math.sin(timeSinceFinish * 5) * 0.05;
-                    ctx.translate(WIDTH / 2, HEIGHT / 2);
-                    ctx.scale(scale, scale);
-
-                    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-                    ctx.fillRect(-WIDTH / 2, -50, WIDTH, 100);
-
-                    ctx.font = 'bold 80px sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.strokeStyle = 'white';
-                    ctx.lineWidth = 4;
-                    ctx.strokeText(text, 0, 0);
-                    ctx.fillStyle = color;
-                    ctx.fillText(text, 0, 0);
-                    ctx.restore();
-                }
-
-                frameIdRef.current = requestAnimationFrame(render);
-            } catch (e) {
-                console.error("Render Loop Error:", e);
-                frameIdRef.current = requestAnimationFrame(render);
             }
         };
 
-        frameIdRef.current = requestAnimationFrame(render);
-        return () => cancelAnimationFrame(frameIdRef.current);
-    }, [status, isPaused, onFinish, settings.laps, settings.name, bestSpeed, viewMode, activeView, isMuted, trackDefinition, countdown]);
+        window.addEventListener('resize', handleResize);
+        handleResize(); // Initial sizing
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            game.stop();
+            gameRef.current = null;
+        };
+    }, []); // Run once on mount
+
+    // Handle Status Changes (Start / Pause / Resume)
+    useEffect(() => {
+        if (!gameRef.current) return;
+
+        const prevStatus = prevStatusRef.current;
+        prevStatusRef.current = status;
+
+        if (status === GameStatus.PLAYING) {
+            if (prevStatus === GameStatus.MENU || prevStatus === GameStatus.GAME_OVER) {
+                // FRESH START
+                gameRef.current.start(settings, trackDefinition, playerName, bestSpeed);
+                gameRef.current.setMuted(isMuted);
+            } else if (isPaused) {
+                gameRef.current.setPaused(true);
+            } else {
+                gameRef.current.setPaused(false);
+            }
+        } else if (status === GameStatus.PAUSED) {
+            gameRef.current.setPaused(true);
+        } else {
+            gameRef.current.stop();
+        }
+    }, [status, isPaused, settings, trackDefinition, playerName, bestSpeed]); // Added all deps to single effect for clarity
+
+    // Input Handling (Touch)
+    const handleTouchInput = (action: 'up' | 'down' | 'left' | 'right', isPressed: boolean) => {
+        if (gameRef.current) {
+            gameRef.current.handleTouchInput(action, isPressed);
+        }
+    };
 
     return (
         <div className="relative w-full h-full touch-none select-none overflow-hidden">
-            <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="w-full h-full object-cover block" />
+            <canvas ref={canvasRef} className="w-full h-full block" />
 
             {status === GameStatus.PLAYING && (
                 <div className="absolute top-0 left-0 w-full p-2 md:p-6 flex justify-between items-start pointer-events-none z-20">
@@ -380,13 +121,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                         </div>
                     </div>
 
-                    <div key={`hud-damage-${activeView}`} className="absolute left-1/2 transform -translate-x-1/2 top-2 md:top-6 flex flex-col items-center gap-1 md:gap-2">
+                    <div className="absolute left-1/2 transform -translate-x-1/2 top-2 md:top-6 flex flex-col items-center gap-1 md:gap-2">
                         <div className="flex items-center justify-center gap-1 md:gap-2 bg-black/60 backdrop-blur px-3 py-1 md:px-6 md:py-2 rounded-full border border-yellow-500/30 shadow-lg min-w-[110px] md:min-w-[160px]">
                             <Timer className="text-yellow-500 w-4 h-4 md:w-5 md:h-5" />
                             <span ref={timeRef} className="font-mono text-xl md:text-3xl font-bold text-yellow-400 tracking-wider text-center">0.00</span>
                         </div>
 
-                        {activeView === 2 ? (
+                        {activeView === 2 || activeView === 3 ? (
                             <div key="split-damage" className="w-full flex mt-1">
                                 <div className="w-1/2 mr-10 flex justify-center">
                                     <div className="w-24 md:w-48 h-2 md:h-4 bg-gray-900 rounded-full border border-gray-600 relative overflow-hidden shadow-lg">
@@ -433,7 +174,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                                 {isMuted ? <VolumeX className="text-red-400 w-4 h-4 md:w-6 md:h-6" /> : <Volume2 className="text-white w-4 h-4 md:w-6 md:h-6" />}
                             </button>
                             <button
-                                onClick={() => setViewMode(prev => prev === '3D' ? 'MAP' : '3D')}
+                                onClick={() => gameRef.current?.toggleMap()}
                                 className="bg-white/10 hover:bg-white/20 p-1 md:p-2 rounded-lg border border-white/20 transition-colors"
                             >
                                 <MapIcon className="text-white w-4 h-4 md:w-6 md:h-6" />
@@ -486,6 +227,24 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                     </div>
                 </div>
             )}
+
+            {/* Visual Overlays for Countdown and Victory would ideally be passed from Game or handled via state here */}
+            {/* Since I removed the rendering logic from here, I can't easily draw text on canvas unless GraphicsEngine does it */}
+            {/* Wait, the original code drew "YA!" and "VICTORY" on the canvas using the 2D context. */}
+            {/* My GraphicsEngine only handles the 3D scene and map. */}
+            {/* I should probably add UI rendering to GraphicsEngine OR keep it here as DOM overlays. */}
+            {/* The original code had DOM overlays for HUD but Canvas Text for "YA!" and "VICTORY". */}
+            {/* For now, to keep strict separation, GraphicsEngine should handle visual text if it's "in-game". */}
+            {/* Or better, make them DOM elements for cleaner separation. */}
+
+            {status === GameStatus.PLAYING && countdown > 0 && (
+                <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
+                    <div className="text-[#eab308] text-9xl font-bold font-sans drop-shadow-[0_0_15px_rgba(0,0,0,1)]">
+                        {countdown}
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 };
