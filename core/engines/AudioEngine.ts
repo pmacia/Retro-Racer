@@ -1,3 +1,5 @@
+import { AUDIO } from '../../constants';
+
 export type SoundEffect = 'CRASH' | 'BUMP' | 'EXPLOSION' | 'TIRE' | 'BARREL' | 'REV' | 'GO' | 'VICTORY' | 'DEFEAT' | 'HEAL' | 'CHECKPOINT' | 'LAP' | 'SPLASH';
 
 export class AudioEngine {
@@ -24,7 +26,7 @@ export class AudioEngine {
 
         // Create Master Gain for Mute Control
         const master = this.context.createGain();
-        master.gain.value = startMuted ? 0 : 0.5;
+        master.gain.value = startMuted ? 0 : AUDIO.MASTER_VOLUME;
         master.connect(this.context.destination);
         this.masterGain = master;
 
@@ -47,7 +49,7 @@ export class AudioEngine {
         this.isMuted = muted;
         if (!this.masterGain || !this.context) return;
         this.masterGain.gain.setTargetAtTime(
-            muted ? 0 : 0.5,
+            muted ? 0 : AUDIO.MASTER_VOLUME,
             this.context.currentTime,
             0.1
         );
@@ -69,24 +71,24 @@ export class AudioEngine {
         // Main Tone (Sawtooth for raw engine sound)
         const osc = ctx.createOscillator();
         osc.type = 'sawtooth';
-        osc.frequency.value = 60; // Idle RPM
+        osc.frequency.value = AUDIO.ENGINE.IDLE_FREQ;
 
         // Modulator (for the "purr" or rumble)
         const mod = ctx.createOscillator();
         mod.type = 'square';
-        mod.frequency.value = 15; // Idle rumble speed
+        mod.frequency.value = AUDIO.ENGINE.IDLE_RUMBLE;
 
         const modGain = ctx.createGain();
-        modGain.gain.value = 20; // Depth of rumble
+        modGain.gain.value = AUDIO.ENGINE.RUMBLE_DEPTH;
 
         // Master Engine Gain
         const gain = ctx.createGain();
-        gain.gain.value = 0.2; // Initial Volume relative to Master
+        gain.gain.value = AUDIO.ENGINE.VOLUME;
 
         // Lowpass filter to muffle the harsh sawtooth
         const filter = ctx.createBiquadFilter();
         filter.type = 'lowpass';
-        filter.frequency.value = 400;
+        filter.frequency.value = AUDIO.ENGINE.FILTER_FREQ;
 
         // Connections: Mod -> ModGain -> Osc Freq
         mod.connect(modGain);
@@ -109,11 +111,11 @@ export class AudioEngine {
         if (!this.engineOsc || !this.engineMod || !this.context) return;
         const ctx = this.context;
 
-        // Base Frequency: 60Hz (Idle) to 300Hz (Max RPM)
-        const targetFreq = 60 + (speedRatio * 240);
+        // Base Frequency: Idle to Max RPM
+        const targetFreq = AUDIO.ENGINE.IDLE_FREQ + (speedRatio * (AUDIO.ENGINE.MAX_FREQ - AUDIO.ENGINE.IDLE_FREQ));
 
-        // Rumble Speed: 15Hz (Idle) to 50Hz (Max)
-        const targetRumble = 15 + (speedRatio * 35);
+        // Rumble Speed
+        const targetRumble = AUDIO.ENGINE.IDLE_RUMBLE + (speedRatio * (AUDIO.ENGINE.MAX_RUMBLE - AUDIO.ENGINE.IDLE_RUMBLE));
 
         // Smooth transitions
         this.engineOsc.frequency.setTargetAtTime(targetFreq, ctx.currentTime, 0.1);

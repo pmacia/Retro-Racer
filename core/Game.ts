@@ -5,7 +5,7 @@ import { AudioEngine } from './engines/AudioEngine';
 import { ParticleEngine } from './engines/ParticleEngine';
 import { InputEngine } from './engines/InputEngine';
 import { updateHUD } from '../services/rendering/hudService';
-import { ROAD_WIDTH, SEGMENT_LENGTH } from '../constants';
+import { ROAD_WIDTH, SEGMENT_LENGTH, MINIMAP, OIL_DECAY_RATE, COUNTDOWN_DURATION, COLORS, CAMERA_VIEWS, FIREWORK_CHANCE, FINISH_SEQUENCE_MS } from '../constants';
 
 export interface UIRefs {
     speed: React.RefObject<HTMLSpanElement>;
@@ -111,7 +111,7 @@ export class Game {
 
     private runCountdown(): void {
         this.audio.stopEngine();
-        let count = 3;
+        let count = COUNTDOWN_DURATION;
         this.onCountdownUpdate(count);
         this.audio.play('REV'); // Rev engine sound
 
@@ -195,16 +195,16 @@ export class Game {
     }
 
     public toggleMap(): void {
-        if (this.activeView === 4) {
-            this.setView(0);
+        if (this.activeView === CAMERA_VIEWS.MAP) {
+            this.setView(CAMERA_VIEWS.PLAYER);
         } else {
-            this.setView(4);
+            this.setView(CAMERA_VIEWS.MAP);
         }
     }
 
     // View State
     // View State
-    private activeView: number = 0; // 0: Player, 1: Rival, 2: Split Vert (L/R), 3: Split Horiz (T/B), 4: Map
+    private activeView: number = CAMERA_VIEWS.PLAYER; // Use CAMERA_VIEWS enum
 
     private setView(view: number) {
         if (this.activeView !== view) {
@@ -233,10 +233,10 @@ export class Game {
         const player = this.cars[0];
 
         // Handle View Switching
-        if (inputState.view1) this.setView(0);
-        if (inputState.view2) this.setView(1);
-        if (inputState.view3) this.setView(2); // Left/Right
-        if (inputState.view4) this.setView(3); // Top/Bottom
+        if (inputState.view1) this.setView(CAMERA_VIEWS.PLAYER);
+        if (inputState.view2) this.setView(CAMERA_VIEWS.RIVAL);
+        if (inputState.view3) this.setView(CAMERA_VIEWS.SPLIT_V); // Left/Right
+        if (inputState.view4) this.setView(CAMERA_VIEWS.SPLIT_H); // Top/Bottom
 
         // Core Game Update
         if (this.isRacing) {
@@ -253,7 +253,7 @@ export class Game {
                             this.particles.spawnObstacleParticles(wx, wz, type as any, car.speed, car);
                         }
 
-                        const cameraCar = (this.activeView === 1 && this.cars[1]) ? this.cars[1] : this.cars[0];
+                        const cameraCar = (this.activeView === CAMERA_VIEWS.RIVAL && this.cars[1]) ? this.cars[1] : this.cars[0];
                         const isFocused = (car === cameraCar);
 
                         if (type === 'OIL' && (car.isPlayer || car === this.cars[1])) {
@@ -307,7 +307,7 @@ export class Game {
         // Update Oil Stains Decay
         this.carOilStains.forEach((stains, idx) => {
             if (stains.length > 0) {
-                stains.forEach(stain => stain.alpha -= 0.005);
+                stains.forEach(stain => stain.alpha -= OIL_DECAY_RATE);
                 this.carOilStains[idx] = stains.filter(s => s.alpha > 0);
             }
         });
@@ -347,7 +347,7 @@ export class Game {
         this.particles.update();
 
         // HUD Updates
-        const cameraCar = (this.activeView === 1 && this.cars[1]) ? this.cars[1] : this.cars[0];
+        const cameraCar = (this.activeView === CAMERA_VIEWS.RIVAL && this.cars[1]) ? this.cars[1] : this.cars[0];
         const hudStartTime = (this.isRacing || this.finishingSeq.active) ? this.startTime : Date.now();
         updateHUD(cameraCar, hudStartTime, this.totalLaps, this.activeView, this.cars, this.uiRefs);
 
@@ -402,7 +402,7 @@ export class Game {
             }
 
             // Fireworks (Only if player won and finished)
-            if (player.finished && !playerDead && !rivalWon && Math.random() < 0.08) {
+            if (player.finished && !playerDead && !rivalWon && Math.random() < FIREWORK_CHANCE) {
                 const cameraX = player.offset * ROAD_WIDTH;
                 const x = cameraX + (Math.random() - 0.5) * 6000;
                 const y = 500 + Math.random() * 1500;
@@ -418,7 +418,7 @@ export class Game {
                 if (player.speed < 100) player.speed = 0;
             }
 
-            if (timeSinceFinish > 1500 && !this.finishingSeq.resultProcessed && (player.speed < 500 || rivalWon)) {
+            if (timeSinceFinish > FINISH_SEQUENCE_MS && !this.finishingSeq.resultProcessed && (player.speed < 500 || rivalWon)) {
                 this.finishingSeq.resultProcessed = true;
                 const totalTime = (Date.now() - this.startTime) / 1000;
                 const totalDistance = this.track.length * SEGMENT_LENGTH * this.totalLaps;
@@ -436,7 +436,7 @@ export class Game {
 
         // Split Screen Logic
         // Split Screen Logic
-        if (this.activeView === 4) {
+        if (this.activeView === CAMERA_VIEWS.MAP) {
             // Full Screen Map
             this.graphics.renderMap(
                 this.cars,
@@ -447,35 +447,35 @@ export class Game {
             );
         } else {
             // Render 3D Scene based on View
-            if (this.activeView === 2) {
+            if (this.activeView === CAMERA_VIEWS.SPLIT_V) {
                 // LEFT / RIGHT
                 const halfW = fullW / 2;
                 this.graphics.renderScene(this.cars[0], this.cars, this.track, this.particles, this.isRacing, this.carOilStains[0], 0, 0, halfW, fullH);
                 if (this.cars[1]) this.graphics.renderScene(this.cars[1], this.cars, this.track, this.particles, this.isRacing, this.carOilStains[1], halfW, 0, halfW, fullH);
                 // Separator
                 const ctx = this.graphics['ctx'];
-                ctx.fillStyle = '#000';
+                ctx.fillStyle = COLORS.SEPARATOR;
                 ctx.fillRect(halfW - 2, 0, 4, fullH);
-            } else if (this.activeView === 3) {
+            } else if (this.activeView === CAMERA_VIEWS.SPLIT_H) {
                 // TOP / BOTTOM
                 const halfH = fullH / 2;
                 this.graphics.renderScene(this.cars[0], this.cars, this.track, this.particles, this.isRacing, this.carOilStains[0], 0, 0, fullW, halfH);
                 if (this.cars[1]) this.graphics.renderScene(this.cars[1], this.cars, this.track, this.particles, this.isRacing, this.carOilStains[1], 0, halfH, fullW, halfH);
                 // Separator
                 const ctx = this.graphics['ctx'];
-                ctx.fillStyle = '#000';
+                ctx.fillStyle = COLORS.SEPARATOR;
                 ctx.fillRect(0, halfH - 2, fullW, 4);
             } else {
                 // Single View (Player or Rival)
-                const cameraCar = (this.activeView === 1 && this.cars[1]) ? this.cars[1] : this.cars[0];
-                const carIdx = (this.activeView === 1 && this.cars[1]) ? 1 : 0;
+                const cameraCar = (this.activeView === CAMERA_VIEWS.RIVAL && this.cars[1]) ? this.cars[1] : this.cars[0];
+                const carIdx = (this.activeView === CAMERA_VIEWS.RIVAL && this.cars[1]) ? 1 : 0;
                 this.graphics.renderScene(cameraCar, this.cars, this.track, this.particles, this.isRacing, this.carOilStains[carIdx], 0, 0, fullW, fullH);
             }
 
             // Mini-Map (Overlay)
             if (this.showMinimapOverlay) {
-                const mapW = Math.max(150, Math.min(250, fullW * 0.25));
-                const mapH = mapW * 0.75;
+                const mapW = Math.max(MINIMAP.MIN_WIDTH, Math.min(MINIMAP.MAX_WIDTH, fullW * MINIMAP.WIDTH_RATIO));
+                const mapH = mapW * MINIMAP.ASPECT_RATIO;
 
                 this.graphics.renderMap(
                     this.cars,
@@ -483,8 +483,8 @@ export class Game {
                     mapW,
                     mapH,
                     true, // isOverlay
-                    20,   // x
-                    120   // y
+                    MINIMAP.OFFSET_X,   // x
+                    MINIMAP.OFFSET_Y    // y
                 );
             }
         }

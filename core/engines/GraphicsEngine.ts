@@ -1,5 +1,5 @@
 import { Car, Segment, OilStain } from '../../types';
-import { COLORS, ROAD_WIDTH, CAMERA_DEPTH, SEGMENT_LENGTH, VISIBILITY } from '../../constants';
+import { COLORS, ROAD_WIDTH, CAMERA_DEPTH, SEGMENT_LENGTH, VISIBILITY, CAMERA_HEIGHT, VIEWING_DISTANCE } from '../../constants';
 import { project } from '../../services/gameEngine';
 import { drawCar } from '../../services/rendering/drawCar';
 import { drawSprite } from '../../services/rendering/drawObstacles';
@@ -63,7 +63,7 @@ export class GraphicsEngine {
         // 2. Prepare Track Rendering
         const trackLen = track.length;
         const cameraX = cameraCar.offset * ROAD_WIDTH;
-        const cameraY = 1500;
+        const cameraY = CAMERA_HEIGHT;
         const cameraZ = cameraCar.z;
         const baseSegmentIndex = Math.floor(cameraZ / SEGMENT_LENGTH) % trackLen;
         const baseSegment = track[baseSegmentIndex];
@@ -72,12 +72,7 @@ export class GraphicsEngine {
         let x = 0;
         let dx = -(baseSegment.curve * basePercent);
 
-        // 3. Render Segments (Back to Front painter's algo is naturally handled by z-buffer-like clip or painter's algo?
-        // Actually this loop renders front-to-back but uses 'maxY' to clip hidden segments (occlusion culling)?
-        // No, standard Outrun uses back-to-front or uses clipping.
-        // implementation here uses n=0 to VISIBILITY (Front to Back)
-        // creating polygons. 'maxY' tracks the lowest blocking Y coordinate (highest on screen).
-
+        // 3. Render Segments (Front to Back for occlusion)
         for (let n = 0; n < VISIBILITY; n++) {
             const i = (baseSegmentIndex + n) % trackLen;
             const segment = track[i];
@@ -125,6 +120,12 @@ export class GraphicsEngine {
             const segment = track[i];
             if (!segment.screen) continue;
 
+            const loopZ = (i < baseSegmentIndex) ? trackLen * SEGMENT_LENGTH : 0;
+            const segmentZ = (segment.index * SEGMENT_LENGTH + loopZ) - cameraZ;
+
+            // Don't draw if behind camera or too far
+            if (segmentZ < 0 || segmentZ > VIEWING_DISTANCE) continue;
+
             // Sprites
             segment.sprites.forEach(sprite => {
                 const scale = segment.screen!.w / (ROAD_WIDTH / 2);
@@ -162,11 +163,14 @@ export class GraphicsEngine {
         const playerW = basePlayerW * (viewW / 1024);
         const playerH = playerW * (140 / 340);
         let pY = playerScreenY;
-        if (cameraCar.exploded) pY += (Math.random() - 0.5) * 5;
-        else {
+
+        if (cameraCar.exploded) {
+            pY += (Math.random() - 0.5) * 5;
+        } else {
             const bounce = (2 * Math.random() * (cameraCar.speed / cameraCar.maxSpeed) * viewH / 480) * (Math.random() > 0.5 ? 1 : -1);
             pY += (isRacing ? bounce : 0);
         }
+
         const carColor = cameraCar.exploded ? '#2d2d2d' : cameraCar.color;
         drawCar(ctx, viewX + viewW / 2, pY, playerW, playerH, carColor);
 
@@ -212,7 +216,7 @@ export class GraphicsEngine {
             if (stain.alpha <= 0) return;
 
             ctx.globalAlpha = stain.alpha * 0.7;
-            ctx.fillStyle = '#1a0f00';
+            ctx.fillStyle = COLORS.OIL_STAIN;
 
             const blobCount = 3 + Math.floor(random(stain.seed) * 4);
 
@@ -244,8 +248,7 @@ export class GraphicsEngine {
         ctx.save();
         ctx.translate(x, y);
 
-        // Helper for rounded rect
-        // Using arcTo for broad compatibility
+        // Rounded Rect helper
         const drawRoundedRect = (c: CanvasRenderingContext2D, w: number, h: number, r: number) => {
             c.beginPath();
             c.moveTo(r, 0);
@@ -262,38 +265,17 @@ export class GraphicsEngine {
 
         if (isOverlay) {
             const radius = 16;
-
-            // Define shape
             drawRoundedRect(ctx, width, height, radius);
-
-            // Clip to shape
             ctx.save();
             ctx.clip();
-
-            // Draw Background
-            ctx.fillStyle = 'rgba(7, 11, 20, 0.8)';
+            ctx.fillStyle = COLORS.MINIMAP_BG;
             ctx.fill();
-
-            // Restore clip after background? No, we want to clip the track/cars too.
-            // But if we restore here, the track/cars won't be clipped.
-            // So we DON'T restore yet. We keep the clip active.
-            // However, the original code had `ctx.fillRect` then rendering.
-
-            // Actually, ctx.clip() intersects with current clip.
-            // We want the clip to persist for the track rendering.
-            // So we keep it. We will restore at the very end.
-            // Note: We need TWO restores at the end then. one for the translation save, one for the clip save.
-            // Or simpler: just call clip() on the translation context.
-            // But clip is permanent for the context until restore.
-            // The outer method calls ctx.save() at start and ctx.restore() at end.
-            // So calling ctx.clip() here is fine, it will be cleared by the final restore.
-
         } else {
             ctx.fillStyle = '#070B14';
             ctx.fillRect(0, 0, width, height);
         }
 
-        // Calculate track bounds for perfect scaling
+        // Calculate track bounds
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
         track.forEach(s => {
             if (s.mapX < minX) minX = s.mapX;
@@ -307,15 +289,11 @@ export class GraphicsEngine {
         const padding = 20;
         const availableW = width - padding * 2;
         const availableH = height - padding * 2;
-
-        // Calculate scale to fit track in available space
         const scale = Math.min(availableW / trackW, availableH / trackH);
-
-        // Center the track
         const offsetX = (width - trackW * scale) / 2 - minX * scale;
         const offsetY = (height - trackH * scale) / 2 - minY * scale;
 
-        ctx.strokeStyle = '#334155';
+        ctx.strokeStyle = COLORS.MINIMAP_TRACK;
         ctx.lineWidth = Math.max(2, 3 * scale);
         ctx.beginPath();
         for (let i = 0; i < track.length; i++) {
@@ -334,7 +312,7 @@ export class GraphicsEngine {
             if (seg) {
                 const cx = seg.mapX * scale + offsetX;
                 const cy = seg.mapY * scale + offsetY;
-                ctx.fillStyle = car.isPlayer ? '#22c55e' : '#ef4444';
+                ctx.fillStyle = car.isPlayer ? COLORS.MINIMAP_PLAYER : COLORS.MINIMAP_RIVAL;
                 ctx.beginPath();
                 const carRadius = Math.max(2, 2 * scale);
                 ctx.arc(cx, cy, carRadius, 0, Math.PI * 2);
@@ -346,24 +324,14 @@ export class GraphicsEngine {
         }
 
         if (isOverlay) {
-            // Restore the clip for the border?
-            // If we clip the border, the outer half of the stroke is lost?
-            // Usually yes.
-            // If we want the border ON TOP of the clip, we should restore first.
-            // But we didn't push a new save stack for the clip specifically if we just used the main one.
-            // But I added `ctx.save(); ctx.clip();` inside the if(isOverlay).
-            // So I should `ctx.restore()` to undo the clip before drawing the border.
-
             ctx.restore(); // Undo clip
-
-            // Draw Border
-            const radius = 16;
-            ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)';
+            ctx.strokeStyle = COLORS.MINIMAP_BORDER;
             ctx.lineWidth = 2;
+            const radius = 16;
             drawRoundedRect(ctx, width, height, radius);
             ctx.stroke();
         }
 
-        ctx.restore(); // Final restore
+        ctx.restore(); // Final restore (undo translation)
     }
 }

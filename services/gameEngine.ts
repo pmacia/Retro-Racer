@@ -1,6 +1,6 @@
 
 import { Car, Segment, Point3D, ProjectPoint, Difficulty, TrackDefinition } from '../types';
-import { SEGMENT_LENGTH, ROAD_WIDTH, COLORS, OBSTACLES, PHYSICS, DAMAGE } from '../constants';
+import { SEGMENT_LENGTH, ROAD_WIDTH, COLORS, OBSTACLES, PHYSICS, DAMAGE, AI } from '../constants';
 
 // --- Math Helpers ---
 const easeIn = (a: number, b: number, percent: number) => a + (b - a) * Math.pow(percent, 2);
@@ -156,15 +156,15 @@ export const createCars = (playerColor: string, playerName: string, difficulty: 
 
     switch (difficulty) {
         case Difficulty.ROOKIE:
-            aiMaxSpeed = 16000;
+            aiMaxSpeed = AI.SPEED_MULTIPLIERS.ROOKIE;
             break;
         case Difficulty.AMATEUR:
             if (referenceSpeedUnits > 0) aiMaxSpeed = referenceSpeedUnits * 0.90;
-            else aiMaxSpeed = 20000;
+            else aiMaxSpeed = AI.SPEED_MULTIPLIERS.AMATEUR_BASE;
             break;
         case Difficulty.PRO:
             if (referenceSpeedUnits > 0) aiMaxSpeed = referenceSpeedUnits * 1.05;
-            else aiMaxSpeed = 23500;
+            else aiMaxSpeed = AI.SPEED_MULTIPLIERS.PRO_BASE;
             aiMaxSpeed = Math.min(aiMaxSpeed, PHYSICS.MAX_SPEED + 1000);
             break;
     }
@@ -250,8 +250,8 @@ export const updateGame = (
                 const sprite = segment.sprites[i];
                 const spriteW = (sprite.width / ROAD_WIDTH) * 0.6;
 
-                // Collision detection (Car width is ~0.3 units in offset space)
-                if (Math.abs(car.offset - sprite.offset) < (spriteW + 0.15)) {
+                // Collision detection
+                if (Math.abs(car.offset - sprite.offset) < (spriteW + (PHYSICS.COLLISION_BOX.width / 3))) {
 
                     const segZ = checkIdx * SEGMENT_LENGTH;
                     let distZ = car.z - segZ;
@@ -274,7 +274,7 @@ export const updateGame = (
                                 car.offset += (car.offset > sprite.offset ? 0.2 : -0.2);
                                 break;
                             case 'PUDDLE':
-                                car.speed *= 0.90; // Increased penalty (was 0.95)
+                                car.speed *= PHYSICS.PUDDLE_FRICTION;
                                 // Hydroplaning: slight lateral pull
                                 car.offset += (Math.random() - 0.5) * 0.12;
                                 break;
@@ -320,11 +320,11 @@ export const updateGame = (
         if (distZ < -trackLength / 2) distZ += trackLength;
 
         // Detection Box
-        const CAR_HIT_LENGTH = 700;
-        const CAR_HIT_WIDTH = 0.45; // Reduced from 0.6 to allow tighter overtaking
+        const hitLen = PHYSICS.COLLISION_BOX.length;
+        const hitWidth = PHYSICS.COLLISION_BOX.width;
 
-        if (Math.abs(distZ) < CAR_HIT_LENGTH) {
-            if (Math.abs(player.offset - rival.offset) < CAR_HIT_WIDTH) {
+        if (Math.abs(distZ) < hitLen) {
+            if (Math.abs(player.offset - rival.offset) < hitWidth) {
 
                 const isLongitudinalHit = Math.abs(distZ) > 350; // Balanced rear vs side
                 const playerIsBehind = distZ < 0;
@@ -343,7 +343,7 @@ export const updateGame = (
                             player.speed = rival.speed * 0.75;
                             rival.speed += 500;
 
-                            let newZ = rival.z - (CAR_HIT_LENGTH + 20);
+                            let newZ = rival.z - (hitLen + 20);
                             if (newZ < 0) newZ += trackLength;
                             player.z = newZ;
 
@@ -406,9 +406,9 @@ export const updateGame = (
         if (distZ < -trackLength / 2) distZ += trackLength;
 
         // Player is behind rival and close laterally
-        if (distZ < 0 && distZ > -2500 && Math.abs(player.offset - rival.offset) < 0.35) {
-            effectiveMaxSpeed *= 1.10; // 10% more top speed
-            accelerationMultiplier = 1.25; // 25% more punch
+        if (distZ < 0 && distZ > -PHYSICS.DRAFTING.DISTANCE && Math.abs(player.offset - rival.offset) < PHYSICS.DRAFTING.OFFSET) {
+            effectiveMaxSpeed *= PHYSICS.DRAFTING.SPEED_BOOST;
+            accelerationMultiplier = PHYSICS.DRAFTING.ACCEL_BOOST;
             callbacks.onDrafting(player, rival);
         }
     }
@@ -423,7 +423,7 @@ export const updateGame = (
     }
 
     // Offroad friction (Quadratic)
-    const offroadDist = Math.abs(player.offset) - 0.75;
+    const offroadDist = Math.abs(player.offset) - PHYSICS.OFFROAD_LIMIT;
     if (offroadDist > 0) {
         const depth = Math.min(1.0, offroadDist / 0.5);
         player.speed -= (depth * depth * PHYSICS.DECEL_OFFROAD);
@@ -535,7 +535,7 @@ export const updateGame = (
         } else {
             // === AUTOMATIC AI MODE ===
             // 1. Acceleration & Braking (Look Ahead)
-            const lookAhead = 45;
+            const lookAhead = AI.LOOKAHEAD;
             const futureSegment = track[(Math.floor(ai.z / SEGMENT_LENGTH) + lookAhead) % track.length];
             const futureCurve = Math.abs(futureSegment.curve);
 
@@ -549,20 +549,20 @@ export const updateGame = (
             if (!ai.evasionState) ai.evasionState = 'normal';
 
             // STATE-BASED OVERTAKING LOGIC
-            const isPlayerInFront = distToPlayer > 0 && distToPlayer < 2500;
+            const isPlayerInFront = distToPlayer > 0 && distToPlayer < AI.OVERTAKE_DISTANCE_Z;
             const lateralDistance = Math.abs(player.offset - ai.offset);
-            const isPlayerBlocking = isPlayerInFront && lateralDistance < 1.2;
+            const isPlayerBlocking = isPlayerInFront && lateralDistance < AI.LATERAL_BLOCK_LIMIT;
 
             if (ai.evasionState === 'normal') {
                 if (isPlayerBlocking && distToPlayer < 2000) ai.evasionState = 'blocked';
             } else if (ai.evasionState === 'blocked') {
-                if (!isPlayerBlocking || distToPlayer > 2500) ai.evasionState = 'normal';
+                if (!isPlayerBlocking || distToPlayer > AI.OVERTAKE_DISTANCE_Z) ai.evasionState = 'normal';
                 else ai.evasionState = 'evading';
             } else if (ai.evasionState === 'evading') {
                 const hasLeftGap = player.offset > 0.3 && ai.offset < -0.3;
                 const hasRightGap = player.offset < -0.3 && ai.offset > 0.3;
                 if (hasLeftGap || hasRightGap) ai.evasionState = 'overtaking';
-                else if (!isPlayerInFront || distToPlayer > 2500) ai.evasionState = 'normal';
+                else if (!isPlayerInFront || distToPlayer > AI.OVERTAKE_DISTANCE_Z) ai.evasionState = 'normal';
                 else if (!isPlayerBlocking && distToPlayer < 1500) ai.evasionState = 'overtaking';
             } else if (ai.evasionState === 'overtaking') {
                 if (distToPlayer < 0 || distToPlayer > 3000) ai.evasionState = 'normal';
@@ -571,7 +571,7 @@ export const updateGame = (
 
             // SPEED CONTROL
             if (ai.evasionState === 'blocked') {
-                const safetyGap = 600;
+                const safetyGap = AI.SAFETY_GAP;
                 const minBlockedSpeed = (ai.maxSpeed * aiMaxSpeedMultiplier) * 0.2;
                 if (distToPlayer < safetyGap) {
                     ai.speed -= PHYSICS.BRAKING * 1.8;
@@ -601,8 +601,8 @@ export const updateGame = (
 
             // 3. DODGING & AVOIDANCE LOGIC
             let targetOffset = -0.4;
-            const scanDistance = 30;
-            const repairScanDistance = 50;
+            const scanDistance = AI.SCAN_DISTANCE;
+            const repairScanDistance = AI.REPAIR_SCAN;
             const currentAIIdx = Math.floor(ai.z / SEGMENT_LENGTH);
             let obstacleToAvoid = null;
             let repairKitToSeek = null;
@@ -682,14 +682,13 @@ export const updateGame = (
             car.lapTime += dt;
         }
 
-        // Checkpoint Logic (3 checkpoints per lap)
-        const CHECKPOINTS_PER_LAP = 3;
-        const checkpointInterval = trackLength / CHECKPOINTS_PER_LAP;
+        // Checkpoint Logic
+        const checkpointInterval = trackLength / PHYSICS.CHECKPOINTS_PER_LAP;
 
         // If car passes the next checkpoint distance
         if (car.z > car.nextCheckpointIndex * checkpointInterval) {
             // Only trigger if we haven't finished the lap yet (handled below)
-            if (car.nextCheckpointIndex < CHECKPOINTS_PER_LAP) {
+            if (car.nextCheckpointIndex < PHYSICS.CHECKPOINTS_PER_LAP) {
                 callbacks.onCheckpoint(car);
                 car.nextCheckpointIndex++;
             }
@@ -708,7 +707,7 @@ export const updateGame = (
             car.z += trackLength;
             car.lap--;
             // If going backwards across start line, reset to last checkpoint
-            car.nextCheckpointIndex = CHECKPOINTS_PER_LAP;
+            car.nextCheckpointIndex = PHYSICS.CHECKPOINTS_PER_LAP;
         }
     });
 };

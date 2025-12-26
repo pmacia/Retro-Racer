@@ -1,6 +1,6 @@
 import { Car } from '../../types';
 import { project } from '../../services/gameEngine';
-import { STEP } from '../../constants';
+import { STEP, PARTICLES, PHYSICS } from '../../constants';
 
 export interface Particle {
     worldX: number;
@@ -41,7 +41,7 @@ export class ParticleEngine {
 
             // Apply gravity to specific types
             if (p.type === 'WATER' || p.type === 'OIL' || p.type === 'DEBRIS' || p.type === 'FIREWORK') {
-                p.vy -= 0.8; // Gravity
+                p.vy -= PARTICLES.GRAVITY.HEAVY;
             }
 
             // Apply oscillation (sine wave drift)
@@ -56,11 +56,11 @@ export class ParticleEngine {
             }
 
             if (p.type === 'DEBRIS' || p.type === 'LEAF') {
-                p.vy -= 0.5; // Gravity
-                p.life -= 0.03;
+                p.vy -= PARTICLES.GRAVITY.MEDIUM;
+                p.life -= PARTICLES.DECAY.DEBRIS;
             } else if (p.type === 'SPARK') {
-                p.vy -= 0.2;
-                p.life -= 0.05;
+                p.vy -= PARTICLES.GRAVITY.LIGHT;
+                p.life -= PARTICLES.DECAY.SPARK;
             } else if (p.type === 'FIREWORK') {
                 p.vy += 2.0; // Strong buoyancy
                 p.vx *= 0.98;
@@ -71,9 +71,8 @@ export class ParticleEngine {
                 // Buoyancy: upward acceleration
                 p.vy += 1.2;
 
-                // Air resistance (stronger for smoke to make it lose forward speed faster)
-                // Increased friction from 0.92 to 0.96 for longer trail
-                const friction = p.type === 'SMOKE' ? 0.96 : 0.95;
+                // Air resistance
+                const friction = p.type === 'SMOKE' ? PARTICLES.FRICTION.SMOKE : PARTICLES.FRICTION.FIRE;
                 p.vx *= friction;
                 p.vy *= friction;
                 p.vz *= friction;
@@ -87,7 +86,7 @@ export class ParticleEngine {
                 p.vz += (Math.random() - 0.5) * 1.0;
 
                 // Slower decay for smoke
-                p.life -= (p.type === 'SMOKE' ? 0.006 : 0.012);
+                p.life -= (p.type === 'SMOKE' ? PARTICLES.DECAY.SMOKE : PARTICLES.DECAY.FIRE);
             } else if (p.type === 'EMBER') {
                 p.vy += 0.5;
                 p.vx += (Math.random() - 0.5) * 1.0;
@@ -99,7 +98,7 @@ export class ParticleEngine {
                 p.life -= 0.05;
                 p.size *= 1.05; // Expand vortex
             } else {
-                p.life -= 0.02;
+                p.life -= (p.type === 'WATER' ? PARTICLES.DECAY.WATER : PARTICLES.DECAY.OIL);
                 p.size *= 1.02;
             }
 
@@ -133,13 +132,13 @@ export class ParticleEngine {
             // Puddles and oil should originate from the road level (lower)
             // Collisions and smoke should originate from the car body (higher)
             const isSplash = (p.type === 'WATER' || p.type === 'OIL');
-            const targetHeight = isSplash ? 200 : 1150;
+            const targetHeight = isSplash ? PARTICLES.PROJECTION.SPLASH_HEIGHT : PARTICLES.PROJECTION.SELF_HEIGHT;
             const renderY = isSelf ? p.worldY + targetHeight : p.worldY;
 
             // Obstacle depth trick: For puddles/oil, we push the worldZ forward if it's "self"
             let renderZ = p.worldZ;
             if (isSelf && (p.type === 'WATER' || p.type === 'OIL')) {
-                renderZ += 1800;
+                renderZ += PARTICLES.PROJECTION.DEPTH_OFFSET;
             }
 
             // Project world to screen
@@ -471,8 +470,8 @@ export class ParticleEngine {
     ): void {
         const isWater = type === 'PUDDLE';
 
-        // Scale factor: 0.2 at idle/very slow, 1.0 at max speed (~12000)
-        const speedRatio = Math.max(0.2, Math.min(1.0, carSpeed / 12000));
+        // Scale factor: 0.2 at idle/very slow, 1.0 at max speed
+        const speedRatio = Math.max(0.2, Math.min(1.0, carSpeed / PHYSICS.SPEED_GRIP_LOSS));
 
         const totalCount = isWater ? Math.floor(100 * speedRatio) : 12;
 
