@@ -343,7 +343,7 @@ Crea pistas aleatorias con secciones de 20-100 segmentos, curvas de -8 a +8.
 
 ## Tipos de Datos (Types)
 
-Definidos en [`types.ts`](file://./types.ts).
+Definidos en [`types.ts`](types.ts).
 
 ### Enums
 
@@ -690,7 +690,7 @@ if (abs(distZ) < CAR_HIT_LENGTH && distX < CAR_HIT_WIDTH) {
 
 ## Constantes del Juego
 
-Archivo [`constants.ts`](file://./constants.ts) centraliza configuración.
+Archivo [`constants.ts`](constants.ts) centraliza configuración.
 
 ### Dimensiones
 
