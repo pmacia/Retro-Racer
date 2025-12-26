@@ -97,6 +97,7 @@ export interface Car {
   exploded: boolean; // True if damage >= 100
   nextCheckpointIndex: number; // For tracking partial lap progress
   evasionState?: 'normal' | 'blocked' | 'evading' | 'overtaking'; // AI evasion state
+  isManualControl?: boolean;
 }
 
 export interface OilStain {

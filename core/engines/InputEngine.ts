@@ -7,6 +7,10 @@ export interface InputState {
     view2: boolean;
     view3: boolean;
     view4: boolean;
+    left2: boolean;
+    right2: boolean;
+    up2: boolean;
+    down2: boolean;
 }
 
 export class InputEngine {
@@ -18,7 +22,11 @@ export class InputEngine {
         view1: false,
         view2: false,
         view3: false,
-        view4: false
+        view4: false,
+        left2: false,
+        right2: false,
+        up2: false,
+        down2: false
     };
 
     private onKeyPress?: (e: KeyboardEvent) => void;
@@ -54,6 +62,10 @@ export class InputEngine {
         this.inputState.view2 = false;
         this.inputState.view3 = false;
         this.inputState.view4 = false;
+        this.inputState.left2 = false;
+        this.inputState.right2 = false;
+        this.inputState.up2 = false;
+        this.inputState.down2 = false;
     }
 
     public setTouchInput(action: 'up' | 'down' | 'left' | 'right', isPressed: boolean): void {
@@ -78,5 +90,11 @@ export class InputEngine {
         if (e.key === '2') this.inputState.view2 = isDown;
         if (e.key === '3') this.inputState.view3 = isDown;
         if (e.key === '4') this.inputState.view4 = isDown;
+
+        // Second Player / Rival Controls
+        if (['i', 'I'].includes(e.key)) this.inputState.up2 = isDown;
+        if (['j', 'J'].includes(e.key)) this.inputState.left2 = isDown;
+        if (['l', 'L'].includes(e.key)) this.inputState.right2 = isDown;
+        if (['m', 'M'].includes(e.key)) this.inputState.down2 = isDown;
     }
 }

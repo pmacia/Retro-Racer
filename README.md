@@ -16,9 +16,9 @@ Para una visión profunda de cómo está construido el juego, consulta el docume
 *   **Motor Pseudo-3D (2.5D)**: Utiliza proyección de perspectiva clásica para simular profundidad y velocidad.
 *   **Física Avanzada**: Implementación de inercia, fuerza centrífuga, "deriva geométrica" (tangente en curvas) y agarre dinámico según la velocidad.
 *   **Sistema de Daños**: Colisiones detalladas. Los coches sufren daños visuales y pueden explotar si se abusa de ellos.
-*   **Manchas de Aceite**: Efecto visual acumulativo en el parabrisas que dificulta la visión y se limpia con el tiempo o al terminar la carrera.
-*   **IA Competitiva y Segura**: Rivales que trazan curvas, adelantan inteligentemente y evitan obstáculos sin realizar maniobras suicidas.
-*   **Obstáculos Destructibles**: Barriles explosivos y neumáticos que reaccionan a los impactos con sistemas de partículas.
+*   **Manchas de Aceite Individuales**: Efecto visual acumulativo en el parabrisas que dificulta la visión. En modos de pantalla partida, cada cámara tiene su propio sistema de manchas independiente.
+*   **IA Competitiva y Segura**: Rivales que trazan curvas, adelantan inteligentemente y evitan obstáculos. Pueden alternarse a control manual en cualquier momento.
+*   **Obstáculos y Salpicaduras**: Barriles explosivos, neumáticos y charcos de agua/aceite con físicas de partículas que reaccionan a la velocidad del coche.
 
 ### 🛠️ Tecnología
 *   **Generación Procedural**: Circuitos infinitos generados aleatoriamente o predefinidos mediante JSON.
@@ -79,18 +79,22 @@ Compite contra la IA, completa el número de vueltas seleccionado y cruza la met
 | **Alternar Minimapa** | `O` o Clic 🗺️ | Clic icono 🗺️ |
 | **Pausa / Continuar** | `P` o Botón UI | Botón Pausa |
 | **Cambiar Cámara** | `1`, `2`, `3`, `4` | - |
+| **Toggle Rival Manual**| `K` (Alterna AI ↔ USER) | - |
+| **Rival: Girar I / D**| `J` / `L` | - |
+| **Rival: Accel / Freno**| `I` / `M` | - |
 
 ### HUD (Interfaz)
 ![HUD Explanation](screenshots/hud.png)
-*   **KM/H**: Velocidad actual.
-*   **TIMER**: Tiempo transcurrido.
-*   **BARRA DE DAÑO**: Ubicada bajo el tiempo. Verde = OK, Rojo = Peligro crítico.
-    *   En **Pantalla Dividida** (tecla `3`): Se muestran dos barras de daño, una para el jugador (izquierda) y otra para el rival (derecha).
-*   **LAP**: Vuelta actual / Total.
-*   **MINIMAPA**: Muestra la posición de los corredores y obstáculos en tiempo real.
+*   **KM/H**: Velocidad actual del coche que sigue la cámara (se sincroniza automáticamente al cambiar de vista).
+*   **TIMER**: Tiempo transcurrido de carrera.
+*   **INDICADOR DE MODO**: Badge "AI" o "USER" que muestra si el Rival está siendo controlado por la computadora o por un humano.
+*   **BARRA DE DAÑO**: Ubicada bajo el tiempo o en los laterales. Verde = OK, Rojo = Peligro crítico.
+    *   En **Pantalla Dividida** (tecla `3` o `4`): Se muestran barras de daño individualizadas para cada carril/vista.
+*   **LAP**: Vuelta actual / Total del coche enfocado.
+*   **MINIMAPA**: Muestra la posición de los corredores y obstáculos en tiempo real (Tecla `O` para alternar).
 *   **VISTAS DE CÁMARA** (Teclas `1`-`4` o `Alt` + `1`-`4`):
     *   **Vista Jugador** (tecla `1`): Cámara clásica tras el coche del jugador.
-    *   **Vista Rival** (tecla `2`): Cámara de seguimiento para el líder de la IA.
+    *   **Vista Rival** (tecla `2`): Cámara de seguimiento para el líder de la IA. El velocímetro y HUD se vinculan a sus estadísticas.
     *   **Pantalla Dividida Vertical** (tecla `3`): Vista lado a lado para Player y CPU.
     *   **Pantalla Dividida Horizontal** (tecla `4`): Vista arriba y abajo.
 
@@ -139,8 +143,8 @@ Para más detalles sobre la organización de los archivos y la arquitectura del 
   │     │     ├── drawTrack.ts      # Renderizado de pista con perspectiva
   │     │     ├── drawEnvironment.ts # Cielo, césped, montañas
   │     │     ├── drawObstacles.ts  # Sprites (árboles, barriles, etc.)
-  │     │     ├── drawParticles.ts  # Sistema de partículas
-  │     │     └── drawUI.ts         # Mini-mapa y cuenta atrás
+  │     │     ├── drawParticles.ts  # Lógica de renderizado de partículas
+  │     │     └── drawUI.ts         # HUD, Badge de modo y cuenta atrás
   │     ├── gameEngine.ts     # Lógica física, IA y colisiones
   │     ├── trackService.ts   # Definiciones de circuitos y generador aleatorio
   │     └── storageService.ts # Gestión de LocalStorage para récords

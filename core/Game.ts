@@ -1,4 +1,4 @@
-import { Car, Segment, TrackDefinition, OilStain, GameStatus, PlayerSettings, Difficulty } from '../types';
+import { Car, Segment, TrackDefinition, OilStain, GameStatus, PlayerSettings } from '../types';
 import { createCars, createTrack, updateGame } from '../services/gameEngine';
 import { GraphicsEngine } from './engines/GraphicsEngine';
 import { AudioEngine } from './engines/AudioEngine';
@@ -13,6 +13,7 @@ export interface UIRefs {
     lap: React.RefObject<HTMLSpanElement>;
     damage: React.RefObject<HTMLDivElement>;
     rivalDamage: React.RefObject<HTMLDivElement>;
+    controlBadge: React.RefObject<HTMLSpanElement>;
 }
 
 export class Game {
@@ -24,7 +25,7 @@ export class Game {
     // Game State
     private cars: Car[] = [];
     private track: Segment[] = [];
-    private oilStains: OilStain[] = [];
+    private carOilStains: OilStain[][] = [[], []]; // Per car (Player, Rival)
     private status: GameStatus = GameStatus.MENU;
     private isRacing: boolean = false;
     private startTime: number = 0;
@@ -32,11 +33,6 @@ export class Game {
     private frameId: number = 0;
     private countdownInterval: number | null = null;
     private showMinimapOverlay: boolean = true;
-
-    // Config
-    private settings: PlayerSettings;
-    private trackDefinition: TrackDefinition;
-    private bestSpeed: number;
     private playerName: string = 'Player';
     private totalLaps: number = 3;
 
@@ -76,10 +72,7 @@ export class Game {
         this.onFinish = onFinish;
         this.onCountdownUpdate = onCountdownUpdate;
 
-        // Placeholder initial config
-        this.settings = { name: 'Player', color: '#ff0000', difficulty: Difficulty.AMATEUR, laps: 3, trackId: 'test' };
-        this.trackDefinition = { id: 'test', name: 'Placeholder', description: 'Loading...', layout: [] };
-        this.bestSpeed = 0;
+        this.totalLaps = 3;
     }
 
     public start(
@@ -90,17 +83,14 @@ export class Game {
     ): void {
         this.stop(); // Cleanup previous if any
 
-        this.settings = settings;
-        this.trackDefinition = trackDefinition;
         this.playerName = playerName;
-        this.bestSpeed = bestSpeed;
         this.totalLaps = settings.laps || 3; // Respect settings
         this.status = GameStatus.PLAYING;
 
         // Initialize State
         this.cars = createCars(settings.color, settings.name, settings.difficulty, bestSpeed);
         this.track = createTrack(trackDefinition);
-        this.oilStains = [];
+        this.carOilStains = [[], []];
         this.particles.clear();
         this.input.clear();
         this.input.setupListeners((e) => this.handleKeyPress(e));
@@ -182,6 +172,18 @@ export class Game {
         if (key === 'p') {
             this.onPauseToggle?.();
         }
+
+        // Rival Manual Control Toggle ('k' or 'Alt+k')
+        if (key === 'k' && this.cars[1]) {
+            this.cars[1].isManualControl = !this.cars[1].isManualControl;
+            // Provide a small visual/dev feedback if needed (could add a HUD message later)
+        }
+    }
+
+    public toggleRivalControl(): void {
+        if (this.cars[1]) {
+            this.cars[1].isManualControl = !this.cars[1].isManualControl;
+        }
     }
 
     public handleTouchInput(action: 'up' | 'down' | 'left' | 'right', isPressed: boolean): void {
@@ -248,27 +250,29 @@ export class Game {
                     onObstacleHit: (car, type, wx, wy, wz) => {
                         this.particles.spawnCollisionParticles(wx, wy, wz, type as any);
                         if (type === 'PUDDLE' || type === 'OIL') {
-                            // VISUAL TRICK: For the player car, push the particles 1800 units ahead
-                            // so they project at the "base" of the 2D car on screen.
-                            const visualOffset = (car === this.cars[0]) ? 1800 : 0;
-                            this.particles.spawnObstacleParticles(wx, wz, type as any, visualOffset, car.speed);
+                            this.particles.spawnObstacleParticles(wx, wz, type as any, car.speed, car);
                         }
-                        if (type === 'OIL' && car.isPlayer) {
-                            this.oilStains.push({
+
+                        const cameraCar = (this.activeView === 1 && this.cars[1]) ? this.cars[1] : this.cars[0];
+                        const isFocused = (car === cameraCar);
+
+                        if (type === 'OIL' && (car.isPlayer || car === this.cars[1])) {
+                            const carIdx = car.isPlayer ? 0 : 1;
+                            this.carOilStains[carIdx].push({
                                 alpha: 1.0,
                                 seed: Math.random()
                             });
                         }
 
-                        // Audio only for Player (or very close events?)
-                        if (car.isPlayer) {
+                        // Audio only for Focused Car
+                        if (isFocused) {
                             if (type === 'PUDDLE') this.audio.play('SPLASH');
                             else if (type === 'OIL') this.audio.play('TIRE');
                             else if (type === 'REPAIR') this.audio.play('HEAL');
                             else this.audio.play('CRASH');
                         }
                     },
-                    onCarHit: (type, severity, wx, wy, wz) => {
+                    onCarHit: (type, _severity, wx, wy, wz) => {
                         this.particles.spawnCollisionParticles(wx, wy, wz, 'DEBRIS');
                         this.audio.play(type === 'SIDE' ? 'BUMP' : 'CRASH');
                     },
@@ -301,10 +305,12 @@ export class Game {
         }
 
         // Update Oil Stains Decay
-        if (this.oilStains.length > 0) {
-            this.oilStains.forEach(stain => stain.alpha -= 0.005);
-            this.oilStains = this.oilStains.filter(s => s.alpha > 0);
-        }
+        this.carOilStains.forEach((stains, idx) => {
+            if (stains.length > 0) {
+                stains.forEach(stain => stain.alpha -= 0.005);
+                this.carOilStains[idx] = stains.filter(s => s.alpha > 0);
+            }
+        });
 
         // Particle Updates
         this.cars.forEach(car => {
@@ -341,9 +347,9 @@ export class Game {
         this.particles.update();
 
         // HUD Updates
-        // Force timer to 0 during countdown (by passing Date.now() as startTime so diff is 0)
+        const cameraCar = (this.activeView === 1 && this.cars[1]) ? this.cars[1] : this.cars[0];
         const hudStartTime = (this.isRacing || this.finishingSeq.active) ? this.startTime : Date.now();
-        updateHUD(player, hudStartTime, this.totalLaps, this.activeView, this.cars, this.uiRefs);
+        updateHUD(cameraCar, hudStartTime, this.totalLaps, this.activeView, this.cars, this.uiRefs);
 
         // Finishing Logic
         this.handleFinish(player, this.cars[1]);
@@ -444,8 +450,8 @@ export class Game {
             if (this.activeView === 2) {
                 // LEFT / RIGHT
                 const halfW = fullW / 2;
-                this.graphics.renderScene(this.cars[0], this.cars, this.track, this.particles, this.isRacing, this.oilStains, 0, 0, halfW, fullH);
-                if (this.cars[1]) this.graphics.renderScene(this.cars[1], this.cars, this.track, this.particles, this.isRacing, [], halfW, 0, halfW, fullH);
+                this.graphics.renderScene(this.cars[0], this.cars, this.track, this.particles, this.isRacing, this.carOilStains[0], 0, 0, halfW, fullH);
+                if (this.cars[1]) this.graphics.renderScene(this.cars[1], this.cars, this.track, this.particles, this.isRacing, this.carOilStains[1], halfW, 0, halfW, fullH);
                 // Separator
                 const ctx = this.graphics['ctx'];
                 ctx.fillStyle = '#000';
@@ -453,8 +459,8 @@ export class Game {
             } else if (this.activeView === 3) {
                 // TOP / BOTTOM
                 const halfH = fullH / 2;
-                this.graphics.renderScene(this.cars[0], this.cars, this.track, this.particles, this.isRacing, this.oilStains, 0, 0, fullW, halfH);
-                if (this.cars[1]) this.graphics.renderScene(this.cars[1], this.cars, this.track, this.particles, this.isRacing, [], 0, halfH, fullW, halfH);
+                this.graphics.renderScene(this.cars[0], this.cars, this.track, this.particles, this.isRacing, this.carOilStains[0], 0, 0, fullW, halfH);
+                if (this.cars[1]) this.graphics.renderScene(this.cars[1], this.cars, this.track, this.particles, this.isRacing, this.carOilStains[1], 0, halfH, fullW, halfH);
                 // Separator
                 const ctx = this.graphics['ctx'];
                 ctx.fillStyle = '#000';
@@ -462,7 +468,8 @@ export class Game {
             } else {
                 // Single View (Player or Rival)
                 const cameraCar = (this.activeView === 1 && this.cars[1]) ? this.cars[1] : this.cars[0];
-                this.graphics.renderScene(cameraCar, this.cars, this.track, this.particles, this.isRacing, this.oilStains);
+                const carIdx = (this.activeView === 1 && this.cars[1]) ? 1 : 0;
+                this.graphics.renderScene(cameraCar, this.cars, this.track, this.particles, this.isRacing, this.carOilStains[carIdx], 0, 0, fullW, fullH);
             }
 
             // Mini-Map (Overlay)

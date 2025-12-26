@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { GameStatus, PlayerSettings, TrackDefinition } from '../types';
 
-import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Gauge, Timer, Flag, Map as MapIcon, Skull, Volume2, VolumeX } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Gauge, Timer, Flag, Map as MapIcon, Skull, Volume2, VolumeX, Pause, Play, Cpu } from 'lucide-react';
 import { Game } from '../core/Game';
 
 interface GameCanvasProps {
@@ -25,6 +25,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
     const lapRef = useRef<HTMLSpanElement>(null);
     const damageRef = useRef<HTMLDivElement>(null);
     const rivalDamageRef = useRef<HTMLDivElement>(null);
+    const controlBadgeRef = useRef<HTMLSpanElement>(null);
 
     const [countdown, setCountdown] = useState<number>(3);
     const [activeView, setActiveView] = useState<number>(0);
@@ -48,7 +49,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
         // Instantiate Game once
         const game = new Game(
             canvasRef.current,
-            { speed: speedRef, time: timeRef, lap: lapRef, damage: damageRef, rivalDamage: rivalDamageRef },
+            { speed: speedRef, time: timeRef, lap: lapRef, damage: damageRef, rivalDamage: rivalDamageRef, controlBadge: controlBadgeRef },
             onFinish,
             setCountdown // Connect countdown callback
         );
@@ -161,25 +162,57 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
                         )}
                     </div>
 
-                    <div className="flex flex-col items-end gap-1 md:gap-2 pointer-events-auto">
-                        <div className="flex items-center gap-1 md:gap-2 bg-black/50 backdrop-blur px-2 py-1 md:px-4 md:py-2 rounded-xl border border-green-500/30 shadow-lg">
-                            <span className="hidden md:inline text-sm text-green-400 font-bold mt-1">LAP</span>
-                            <span ref={lapRef} className="font-mono text-lg md:text-3xl font-bold text-white tracking-widest">1/{settings.laps}</span>
-                            <Flag className="text-green-500 w-4 h-4 md:w-6 md:h-6" />
+                    <div className="flex flex-col items-end gap-1 md:gap-3 pointer-events-auto">
+                        {/* Lap Counter */}
+                        <div className="flex items-center gap-1 md:gap-2 bg-black/60 backdrop-blur px-2 py-1 md:px-4 md:py-1.5 rounded-xl border border-green-500/30 shadow-lg mb-1">
+                            <span className="hidden md:inline text-[10px] text-green-400 font-bold uppercase tracking-tighter">Lap</span>
+                            <span ref={lapRef} className="font-mono text-sm md:text-2xl font-bold text-white tracking-widest leading-none">1/{settings.laps}</span>
+                            <Flag className="text-green-500 w-3 h-3 md:w-5 md:h-5" />
                         </div>
 
-                        <div className="flex gap-1 md:gap-2">
+                        {/* Unified Control Toolbar */}
+                        <div className="flex items-center gap-1 md:gap-2 bg-black/60 backdrop-blur p-1 md:p-1.5 rounded-xl border border-white/10 shadow-2xl">
+                            {/* Pause Toggle */}
+                            <button
+                                onClick={onPauseToggle}
+                                className="bg-white/5 hover:bg-white/20 p-1.5 md:p-2.5 rounded-lg border border-white/10 transition-all active:scale-90"
+                                title={isPaused ? "Resume (P)" : "Pause (P)"}
+                            >
+                                {isPaused ?
+                                    <Play className="text-green-400 fill-green-400 w-4 h-4 md:w-5 md:h-5" /> :
+                                    <Pause className="text-white fill-white w-4 h-4 md:w-5 md:h-5" />
+                                }
+                            </button>
+
+                            {/* Audio Toggle */}
                             <button
                                 onClick={toggleMute}
-                                className="bg-white/10 hover:bg-white/20 p-1 md:p-2 rounded-lg border border-white/20 transition-colors"
+                                className="bg-white/5 hover:bg-white/20 p-1.5 md:p-2.5 rounded-lg border border-white/10 transition-all active:scale-90"
+                                title={isMuted ? "Unmute" : "Mute"}
                             >
-                                {isMuted ? <VolumeX className="text-red-400 w-4 h-4 md:w-6 md:h-6" /> : <Volume2 className="text-white w-4 h-4 md:w-6 md:h-6" />}
+                                {isMuted ?
+                                    <VolumeX className="text-red-400 w-4 h-4 md:w-5 md:h-5" /> :
+                                    <Volume2 className="text-white w-4 h-4 md:w-5 md:h-5" />
+                                }
                             </button>
+
+                            {/* Map Toggle */}
                             <button
                                 onClick={() => gameRef.current?.toggleMap()}
-                                className="bg-white/10 hover:bg-white/20 p-1 md:p-2 rounded-lg border border-white/20 transition-colors"
+                                className="bg-white/5 hover:bg-white/20 p-1.5 md:p-2.5 rounded-lg border border-white/10 transition-all active:scale-90"
+                                title="Toggle Map (O)"
                             >
-                                <MapIcon className="text-white w-4 h-4 md:w-6 md:h-6" />
+                                <MapIcon className="text-white w-4 h-4 md:w-5 md:h-5" />
+                            </button>
+
+                            {/* Rival Mode Toggle */}
+                            <button
+                                onClick={() => gameRef.current?.toggleRivalControl()}
+                                className="bg-white/5 hover:bg-white/20 pl-2 pr-1.5 md:pl-3 md:pr-2 py-1 md:py-1.5 rounded-lg border border-white/10 transition-all active:scale-95 flex items-center gap-1.5 md:gap-2 group"
+                                title="Toggle Rival Control (K)"
+                            >
+                                <Cpu className="text-blue-400 w-4 h-4 md:w-5 md:h-5 transition-transform group-hover:scale-110" />
+                                <span ref={controlBadgeRef} className="text-[9px] md:text-xss font-bold px-1.5 py-0.5 rounded bg-blue-500 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)] min-w-[24px] md:min-w-[32px] text-center uppercase">AI</span>
                             </button>
                         </div>
                     </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, RotateCcw, Trophy, Flag, ChevronDown, ChevronUp, Map, Save, Download, Trash2, X } from 'lucide-react';
+import { Play, RotateCcw, Trophy, Flag, ChevronDown, ChevronUp, Map, Save, Download, Trash2, X } from 'lucide-react';
 import GameCanvas from './components/GameCanvas';
 import { GameStatus, PlayerSettings, Score, Difficulty, TrackDefinition } from './types';
 import { saveScore, getScores, getCustomTracks, saveCustomTrack, deleteCustomTrack, getSettings, saveSettings } from './services/storageService';
@@ -211,15 +211,6 @@ const App: React.FC = () => {
         )}
       </div>
 
-      {/* UI Overlay: Pause Button */}
-      {status === GameStatus.PLAYING && (
-        <button
-          onClick={pauseGame}
-          className="absolute top-4 right-4 z-20 bg-black/50 hover:bg-black/80 text-white border border-cyan-500 p-3 rounded-full shadow-[0_0_15px_rgba(6,182,212,0.5)] transition backdrop-blur-md"
-        >
-          <Pause size={24} />
-        </button>
-      )}
 
       {/* --- MENU PRINCIPAL --- */}
       {status === GameStatus.MENU && (

@@ -124,16 +124,27 @@ export class ParticleEngine {
     ): void {
         for (const p of this.particles) {
 
-            // DYNAMIC HEIGHT LOGIC:
+            // DYNAMIC HEIGHT AND DEPTH LOGIC:
             // If this particle belongs to the car we are currently viewing from (cameraCar),
-            // we must apply the "Fake 3D" UI offset (+1150) so it matches the floating sprite.
-            // If it belongs to another car, we use its true World position.
+            // we must apply the "Fake 3D" UI offset (+1150 height, +1800 depth for obstacles)
+            // so it matches the floating sprite and projects at the tire base.
             const isSelf = (cameraCar && p.owner === cameraCar);
-            const renderY = isSelf ? p.worldY + 1150 : p.worldY;
+
+            // Puddles and oil should originate from the road level (lower)
+            // Collisions and smoke should originate from the car body (higher)
+            const isSplash = (p.type === 'WATER' || p.type === 'OIL');
+            const targetHeight = isSplash ? 200 : 1150;
+            const renderY = isSelf ? p.worldY + targetHeight : p.worldY;
+
+            // Obstacle depth trick: For puddles/oil, we push the worldZ forward if it's "self"
+            let renderZ = p.worldZ;
+            if (isSelf && (p.type === 'WATER' || p.type === 'OIL')) {
+                renderZ += 1800;
+            }
 
             // Project world to screen
             const screen = project(
-                { x: p.worldX, y: renderY, z: p.worldZ },
+                { x: p.worldX, y: renderY, z: renderZ },
                 cameraX, cameraY, cameraZ,
                 cameraDepth, width, height, roadWidth
             );
@@ -143,7 +154,7 @@ export class ParticleEngine {
             screen.y += viewY;
 
             // Don't draw if behind camera or too far
-            if (p.worldZ < cameraZ || p.worldZ > cameraZ + 15000) continue;
+            if (renderZ < cameraZ || renderZ > cameraZ + 15000) continue;
 
             const size = p.size * (screen.w / roadWidth); // Scale size by perspective
             if (size < 0.5) continue;
@@ -455,8 +466,8 @@ export class ParticleEngine {
         worldX: number,
         worldZ: number,
         type: 'PUDDLE' | 'OIL',
-        visualOffset: number = 0,
-        carSpeed: number = 0 // Used to scale splash intensity
+        carSpeed: number = 0, // Used to scale splash intensity
+        owner?: Car
     ): void {
         const isWater = type === 'PUDDLE';
 
@@ -478,7 +489,7 @@ export class ParticleEngine {
                 this.particles.push({
                     worldX: worldX + tireOffset + (Math.random() * 100 - 50),
                     worldY: 10,
-                    worldZ: worldZ + visualOffset + (Math.random() * 200 - 100),
+                    worldZ: worldZ + (Math.random() * 200 - 100),
                     // MASSIVE lateral velocity for "V-Shape" curtain
                     vx: side * (Math.random() * 80 + 40) * speedRatio,
                     vy: (Math.random() * 60 + 20) * speedRatio, // Higher jump
@@ -486,7 +497,8 @@ export class ParticleEngine {
                     life: (0.6 + Math.random() * 0.4), // Halved life for 2x faster animation
                     size: (40 + Math.random() * 80) * (0.5 + 0.5 * speedRatio),
                     r: 255, g: 255, b: 255, a: 1.0,
-                    type: 'WATER'
+                    type: 'WATER',
+                    owner // <-- Track owner
                 });
             }
         } else {
@@ -495,7 +507,7 @@ export class ParticleEngine {
                 this.particles.push({
                     worldX: worldX + (Math.random() * 100 - 50),
                     worldY: 10,
-                    worldZ: worldZ + visualOffset + (Math.random() * 100 - 50),
+                    worldZ: worldZ + (Math.random() * 100 - 50),
                     vx: (Math.random() * 20 - 10),
                     vy: (Math.random() * 15 + 5),
                     vz: (Math.random() * 10 - 5),
@@ -503,7 +515,8 @@ export class ParticleEngine {
                     size: 10 + Math.random() * 20,
                     r: 0, g: 0, b: 0, a: 1.0,
                     type: 'OIL',
-                    angle: Math.random() * Math.PI * 2
+                    angle: Math.random() * Math.PI * 2,
+                    owner // <-- Track owner
                 });
             }
         }

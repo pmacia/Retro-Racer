@@ -12,6 +12,7 @@ export const updateHUD = (
         lap: React.RefObject<HTMLSpanElement>;
         damage: React.RefObject<HTMLDivElement>;
         rivalDamage: React.RefObject<HTMLDivElement>;
+        controlBadge: React.RefObject<HTMLSpanElement>;
     }
 ) => {
     if (refs.speed.current) refs.speed.current.innerText = `${Math.floor(cameraCar.speed / 100)}`;
@@ -25,6 +26,13 @@ export const updateHUD = (
 
     const p1 = cars[0];
     const p2 = cars[1];
+
+    // Update Control Badge (AI vs USER)
+    if (refs.controlBadge.current && p2) {
+        const isManual = p2.isManualControl;
+        refs.controlBadge.current.innerText = isManual ? 'USER' : 'AI';
+        refs.controlBadge.current.className = `text-[10px] font-bold px-2 py-0.5 rounded ${isManual ? 'bg-blue-500/80 text-white' : 'bg-gray-700/80 text-gray-300'}`;
+    }
 
     if (refs.damage.current) {
         const targetCar = (activeView === 2) ? p1 : cameraCar;
