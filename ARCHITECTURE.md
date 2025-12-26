@@ -46,26 +46,27 @@
 ```
 Retro-Racer/
 ├── components/
-│   └── GameCanvas.tsx          # Componente principal del juego (Canvas + Game Loop)
+│   └── GameCanvas.tsx          # Capa React, gestión de Refs y UI Overlay
+├── core/
+│   ├── Game.ts                 # Orquestador principal (Game Loop, Estado, Vistas)
+│   └── engines/
+│       ├── AudioEngine.ts      # Síntesis Web Audio y sonidos continuos
+│       ├── GraphicsEngine.ts   # Renderizado de escena 3D, mapa y pantalla partida
+│       ├── InputEngine.ts      # Gestión unificada de teclado y entrada táctil
+│       └── ParticleEngine.ts   # Sistema de partículas con proyección dinámica
 ├── services/
-│   ├── audio/
-│   │   ├── audioEngine.ts      # Motor de audio (engine sound)
-│   │   └── soundEffects.ts     # Efectos de sonido procedurales
 │   ├── rendering/
-│   │   ├── drawCar.ts          # Renderizado de coches
-│   │   ├── drawEnvironment.ts  # Cielo, montañas, césped
-│   │   ├── drawObstacles.ts    # Árboles, rocas, barriles, llantas
-│   │   ├── drawParticles.ts    # Sistema de partículas
-│   │   ├── drawTrack.ts        # Pista 3D con perspectiva
-│   │   └── drawUI.ts           # HUD y overlays
-│   ├── gameEngine.ts           # Lógica core del juego (física, colisiones, IA)
+│   │   ├── drawCar.ts          # Primitivas de dibujo para vehículos
+│   │   ├── hudService.ts       # Lógica de actualización de elementos del HUD
+│   │   ├── drawObstacles.ts    # Sprites procedurales (árboles, barriles, etc.)
+│   │   └── drawTrack.ts        # Renderizado de segmentos de pista
+│   ├── gameEngine.ts           # Física core, lógica de curvas, colisiones e IA
 │   ├── storageService.ts       # Persistencia (scores, settings, tracks)
 │   └── trackService.ts         # Gestión y generación de pistas
-├── App.tsx                      # Componente raíz (menú, configuración, UI)
 ├── types.ts                     # Definiciones de tipos TypeScript
-├── constants.ts                 # Constantes del juego (física, colores, etc.)
-├── index.tsx                    # Entry point
-└── index.html                   # HTML principal
+├── constants.ts                 # Constantes globales (física, colores, etc.)
+├── App.tsx                      # Menú principal y navegación React
+└── index.tsx                    # Punto de entrada
 ```
 
 ---
@@ -98,40 +99,28 @@ Retro-Racer/
 
 ### GameCanvas.tsx
 
-**Responsabilidad**: Loop principal del juego, renderizado del canvas, gestión de input y estado de la carrera.
+**Responsabilidad**: Punto de entrada de React. Gestiona las referencias del DOM, la inicialización del motor `Game` y el HUD como capa superior.
 
-**Refs clave**:
-```typescript
-- canvasRef: HTMLCanvasElement    // Canvas para el renderizado
-- carsRef: Car[]                  // Coches en la carrera (jugador + IA)
-- trackRef: Segment[]             // Segmentos de la pista
-- inputRef: {...}                 // Estado de teclas (WASD/Arrows)
-- oilStainsRef: OilStain[]        // Manchas de aceite acumulativas en pantalla
-- particlesRef: Particle[]        // Partículas visuales
-```
+**Funcionalidades**:
+- Inicializa la clase `Game` enviando las `UIRefs` (Refs a elementos span/div del HUD).
+- Gestiona el redimensionado del Canvas de forma responsiva.
+- Provee los controles táctiles para dispositivos móviles.
 
-**Ciclo de vida**:
+---
 
-1. **Inicialización** (`useEffect` con `status === PLAYING`):
-   - Crea coches con `createCars()`
-   - Genera pista con `createTrack()`
-   - Inicia cuenta atrás (3, 2, 1, GO!)
-   - Arranca motor de audio
+### core/Game.ts
 
-2. **Game Loop** (requestAnimationFrame):
-   - Actualiza física y IA: `updateGame()`
-   - Renderiza vista 3D o mapa
-   - Actualiza HUD (velocidad, tiempo, daño)
-   - Gestiona finalización de carrera
+**Responsabilidad**: El "Cerebro" del juego. Orquestador central que gestiona el Game Loop, el estado de los coches y la coordinación entre los diferentes motores (Engines).
 
-3. **Cleanup**:
-   - Detiene motor de audio
-   - Cancela animationFrame
+**Estado gestionado**:
+- `cars`: Estado físico de todos los participantes.
+- `track`: Segmentos que componen el circuito.
+- `carOilStains`: Buffer de manchas de aceite por cámara (Player/Rival).
+- `activeView`: Control de cámara (Jugador, Rival, Pantalla Partida V/H, Mapa).
 
-**Renderizado**:
-- Vista 3D (perspectiva pseudo-3D)
-- Vista Mapa (vista aérea 2D)
-- Vista Split Screen (jugador vs IA)
+**Game Loop**:
+- Utiliza `requestAnimationFrame` de forma interna.
+- Orquestra el ciclo: `updateGame` (física) → `audio.update` → `graphics.render` → `hud.update`.
 
 ---
 
@@ -167,15 +156,35 @@ Retro-Racer/
 - Input de dirección: con damping a alta velocidad
 ```
 
-**Colisiones**:
-- **Obstáculos**: Detecta overlap entre coche y sprites de la pista
-- **Coches**: Sistema de cajas de colisión (rear/side) con física de empuje
+**IA (Inteligencia Artificial)**:
+- **Control Adaptativo**: Si `isManualControl` es falso, la IA acelera hacia su velocidad objetivo y frena en curvas según su severidad.
+- **Esquiva Dinámica**: Sistema de evasión para evitar al jugador y obstáculos laterales.
+- **Road Clamping**: Algoritmo de seguridad que impide que los rivales se salgan de la pista accidentalmente.
+- **Control Manual**: Los rivales pueden ser controlados por el usuario ('K'), cambiando su comportamiento de AI a `USER`. 
 
-**IA**:
-- **Acelera** hacia velocidad objetivo (frenado inteligente en curvas según severidad).
-- **Esquiva** al jugador y obstáculos priorizando la seguridad.
-- **Seguridad**: "Road Clamping" impide que la IA se salga de la pista innecesariamente. Mantiene velocidad mínima en horquillas para evitar paradas.
-- **Adelantamientos**: Evalúa huecos y ejecuta maniobras de adelantamiento por carriles seguros.
+---
+
+### 🛠️ Motores Especializados (Engines)
+
+Ubicados en `core/engines/`, estos módulos encapsulan la lógica técnica:
+
+#### GraphicsEngine.ts
+Gestiona el dibujado complejo y las cámaras:
+- **Renderizado de Escena**: Proyecta la pista, objetos y coches.
+- **Sistema de Cámaras**: Soporta vista simple (Player/Rival), Pantalla Partida (Vertical/Horizontal) y vista de Mapa completa.
+- **Z-Ordering**: Implementa un algoritmo de pintor modificado para manejar sprites y coches en el orden correcto de profundidad.
+
+#### ParticleEngine.ts
+Sistema dinámico de efectos visuales:
+- **Localización Dinámica**: Ajusta los offsets visuales (+1150 altura, +1800 profundidad) dependiendo de si el emisor de la partícula es el coche que la cámara está siguiendo. Esto asegura que el humo o las salpicaduras se proyecten correctamente en la base del coche en pantalla partida.
+- **Tipos**: Soporta `WATER`, `OIL`, `SMOKE`, `FIRE`, `DEBRIS`, `SPARK`, `WIND` y `SLIPSTREAM`.
+
+#### AudioEngine.ts
+- **Síntesis Aditiva/SUSTRACTIVA**: Genera el sonido del motor mediante osciladores sawtooth modulados por LFOs.
+- **Feedback Localizado**: Reproduce efectos de colisión y salpicaduras centrados en el coche que el usuario está viendo actualmente.
+
+#### InputEngine.ts
+- **Unificación**: Combina eventos de teclado y toques táctiles en un único `InputState` consultable por el orquestador.
 
 ---
 
@@ -221,11 +230,11 @@ Elementos de fondo estáticos:
 - Montañas procedurales (función seno)
 - Césped plano
 
-#### drawUI.ts
-HUD y overlays:
-- Minimapa (esquina superior izquierda)
-- Cuenta atrás (3, 2, 1, GO!)
-- Overlay de finalización
+#### hudService.ts (en services/rendering/)
+Actualiza los elementos del DOM inyectados mediante Refs:
+- **Velocímetro Sincronizado**: Muestra la velocidad del coche que la cámara está enfocando.
+- **Badge de Control**: Indica si el rival está en modo `AI` o `USER`.
+- **Daño Dinámico**: Muestra barras de salud para ambos competidores en modo pantalla partida.
 
 ---
 
@@ -334,7 +343,7 @@ Crea pistas aleatorias con secciones de 20-100 segmentos, curvas de -8 a +8.
 
 ## Tipos de Datos (Types)
 
-Definidos en [`types.ts`](file:///Users/franciscomaciaperez/Library/CloudStorage/Dropbox/Desarrollo/Retro-Racer/types.ts).
+Definidos en [`types.ts`](file://./types.ts).
 
 ### Enums
 
@@ -370,9 +379,11 @@ interface Car {
   finished: boolean;
   damage: number;      // 0-100 (explota a 100)
   exploded: boolean;
+  isManualControl: boolean; // ¿Controlado por el usuario?
   nextCheckpointIndex: number; // Checkpoint parcial
   evasionState?: string;       // Estado de IA ('normal', 'overtaking', etc.)
 }
+```
 
 #### OilStain (Mancha de Aceite)
 
@@ -381,7 +392,6 @@ interface OilStain {
   alpha: number; // Opacidad (0-1)
   seed: number;  // Semilla para forma aleatoria
 }
-```
 ```
 
 #### Segment (Segmento de Pista)
@@ -484,21 +494,13 @@ const render = () => {
   });
   
   // 4. AUDIO
-  if (isEngineRunning() && !finishing) {
-    updateEngine(car.speed / car.maxSpeed);
-  }
-  
+  audio.update(car.speed / car.maxSpeed);
+
   // 5. RENDERIZADO
-  clearCanvas();
-  
-  if (viewMode === 'MAP') {
-    renderMapView();
-  } else {
-    renderView(ctx, cameraCar, viewport);
-  }
-  
-  drawParticles();
-  updateParticles();
+  graphics.clear();
+  graphics.renderScene(cameraCar, cars, track, carOilStains[cameraIdx]);
+  particles.draw(ctx, cameraCar);
+  particles.update();
   
   // 6. HUD
   updateHUD(speed, time, lap, damage);
@@ -566,7 +568,8 @@ function project(p: Point3D, cameraZ, cameraDepth, width, height, roadWidth) {
 |-------|-------------|-------|
 | **Player** | Cámara detrás del jugador | `1` |
 | **Rival** | Cámara detrás de la IA | `2` |
-| **Split Screen** | Pantalla dividida jugador vs IA | `3` |
+| **Split Screen** | Pantalla horizontal dividida jugador vs IA | `3` |
+| **Split Screen** | Pantalla vertical dividida jugador vs IA | `4` |
 | **Map** | Vista aérea 2D de toda la pista | Botón `MAP` |
 
 ---
@@ -687,7 +690,7 @@ if (abs(distZ) < CAR_HIT_LENGTH && distX < CAR_HIT_WIDTH) {
 
 ## Constantes del Juego
 
-Archivo [`constants.ts`](file:///Users/franciscomaciaperez/Library/CloudStorage/Dropbox/Desarrollo/Retro-Racer/constants.ts) centraliza configuración.
+Archivo [`constants.ts`](file://./constants.ts) centraliza configuración.
 
 ### Dimensiones
 
@@ -827,14 +830,13 @@ flowchart LR
 
 ### Mejoras Potenciales
 
-1. **Multijugador local** (split-screen para 2 jugadores humanos)
-2. **Power-ups** (boost de velocidad, escudo anti-daño)
-3. **Más pistas** (editor visual de pistas)
-4. **Leaderboard online** (backend con API)
-5. **Modos de juego** (contrarreloj, eliminación, drift scoring)
-6. **Gráficos mejorados** (sprites reales en lugar de formas procedurales)
-7. **Efectos climáticos** (lluvia, niebla)
+1. **Power-ups** (boost de velocidad, escudo anti-daño)
+2. **Más pistas** (editor visual de pistas)
+3. **Leaderboard online** (backend con API)
+4. **Modos de juego** (contrarreloj, eliminación, drift scoring)
+5. **Gráficos mejorados** (sprites reales en lugar de formas procedurales)
+6. **Efectos climáticos** (lluvia, niebla)
 
 ---
 
-*Última actualización: 18/12/2024*
+*Última actualización: 26/12/2025*
