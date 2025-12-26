@@ -15,7 +15,7 @@ export interface Particle {
     g: number;
     b: number;
     a: number;
-    type: 'SMOKE' | 'FIRE' | 'DEBRIS' | 'SPARK' | 'LEAF' | 'FIREWORK' | 'EMBER' | 'WATER' | 'OIL';
+    type: 'SMOKE' | 'FIRE' | 'DEBRIS' | 'SPARK' | 'LEAF' | 'FIREWORK' | 'EMBER' | 'WATER' | 'OIL' | 'WIND' | 'SLIPSTREAM';
     angle?: number;
     spin?: number;
     phase?: number;     // For oscillation
@@ -92,6 +92,12 @@ export class ParticleEngine {
                 p.vy += 0.5;
                 p.vx += (Math.random() - 0.5) * 1.0;
                 p.life -= 0.01;
+            } else if (p.type === 'WIND') {
+                // Wind moves very fast relative to camera to create streak effect
+                p.life -= 0.04; // Slower decay (was 0.1)
+            } else if (p.type === 'SLIPSTREAM') {
+                p.life -= 0.05;
+                p.size *= 1.05; // Expand vortex
             } else {
                 p.life -= 0.02;
                 p.size *= 1.02;
@@ -189,8 +195,63 @@ export class ParticleEngine {
                 ctx.beginPath();
                 ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
                 ctx.fill();
+            } else if (p.type === 'WIND') {
+                // Draw Streak Line
+                // Length is determined by pseudo velocity or fixed length + perspective
+                const alpha = p.a * p.life;
+
+                ctx.beginPath();
+                ctx.moveTo(screen.x, screen.y);
+                // "Wind" comes from Z, so it streaks out from center perspective basically?
+                // Actually if we want speed lines at edges, they should point towards the vanishing point (screen center approx).
+                // Or just vertical/diagonal streaks.
+                // Let's make them streak backwards in Z. A line from (x,y,z) to (x, y, z-length).
+                // But here we are in 2D draw.
+                // Simpler: Draw line from X,Y to X,Y-Length? Or radiating from center?
+                // "Speed lines" usually radiate from center.
+                // Let's just draw a line segment representing motion.
+
+                // If we project a point closer to camera, we get the other end of the line.
+                const screen2 = project(
+                    { x: p.worldX, y: renderY, z: p.worldZ - 600 }, // Tail is closer to camera (since particles move past)
+                    cameraX, cameraY, cameraZ,
+                    cameraDepth, width, height, roadWidth
+                );
+                screen2.x += viewX;
+                screen2.y += viewY;
+
+                const grad = ctx.createLinearGradient(screen.x, screen.y, screen2.x, screen2.y);
+                grad.addColorStop(0, `rgba(255, 255, 255, 0)`);
+                grad.addColorStop(1, `rgba(255, 255, 255, ${alpha})`);
+
+                ctx.strokeStyle = grad;
+                ctx.lineWidth = 4; // Bolder lines
+                ctx.moveTo(screen.x, screen.y);
+                ctx.lineTo(screen2.x, screen2.y);
+                ctx.stroke();
+
+            } else if (p.type === 'SLIPSTREAM') {
+                // Draw a thin swirling ring
+                const alpha = p.a * p.life;
+                ctx.beginPath();
+                ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.lineWidth = 3; // Thicker ring
+                ctx.stroke();
+
+                // Small center glow
+                ctx.beginPath();
+                ctx.arc(screen.x, screen.y, size * 0.2, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.5})`;
+                ctx.fill();
+
             } else if (p.type === 'WATER') {
-                ctx.fillStyle = `rgba(100, 150, 255, ${p.a * 0.6})`;
+                const alpha = p.a * Math.min(1.0, p.life * 2);
+                const grad = ctx.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, size);
+                grad.addColorStop(0, `rgba(200, 230, 255, ${alpha})`); // Bright center
+                grad.addColorStop(0.6, `rgba(100, 150, 255, ${alpha * 0.8})`); // Blue splash
+                grad.addColorStop(1, `rgba(100, 150, 255, 0)`);
+                ctx.fillStyle = grad;
                 ctx.beginPath();
                 ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
                 ctx.fill();
@@ -393,23 +454,123 @@ export class ParticleEngine {
     public spawnObstacleParticles(
         worldX: number,
         worldZ: number,
-        type: 'PUDDLE' | 'OIL'
+        type: 'PUDDLE' | 'OIL',
+        visualOffset: number = 0,
+        carSpeed: number = 0 // Used to scale splash intensity
     ): void {
-        const count = 12;
+        const isWater = type === 'PUDDLE';
+
+        // Scale factor: 0.2 at idle/very slow, 1.0 at max speed (~12000)
+        const speedRatio = Math.max(0.2, Math.min(1.0, carSpeed / 12000));
+
+        const totalCount = isWater ? Math.floor(100 * speedRatio) : 12;
+
+        if (isWater) {
+            // Directional Splash: Two jets from the tires
+            for (let i = 0; i < totalCount; i++) {
+                const side = (i < totalCount / 2) ? -1 : 1;
+                const tireOffset = 300 * side;
+
+                // Forward momentum: DRIKED DOWN significantly to avoid "laser" effect
+                // Just a tiny touch of inertia
+                const forwardVz = carSpeed * 0.01 * speedRatio;
+
+                this.particles.push({
+                    worldX: worldX + tireOffset + (Math.random() * 100 - 50),
+                    worldY: 10,
+                    worldZ: worldZ + visualOffset + (Math.random() * 200 - 100),
+                    // MASSIVE lateral velocity for "V-Shape" curtain
+                    vx: side * (Math.random() * 80 + 40) * speedRatio,
+                    vy: (Math.random() * 60 + 20) * speedRatio, // Higher jump
+                    vz: (Math.random() * 40 - 20) + forwardVz, // Random scatter + tiny forward push
+                    life: (0.6 + Math.random() * 0.4), // Halved life for 2x faster animation
+                    size: (40 + Math.random() * 80) * (0.5 + 0.5 * speedRatio),
+                    r: 255, g: 255, b: 255, a: 1.0,
+                    type: 'WATER'
+                });
+            }
+        } else {
+            // Standard Oil blob
+            for (let i = 0; i < totalCount; i++) {
+                this.particles.push({
+                    worldX: worldX + (Math.random() * 100 - 50),
+                    worldY: 10,
+                    worldZ: worldZ + visualOffset + (Math.random() * 100 - 50),
+                    vx: (Math.random() * 20 - 10),
+                    vy: (Math.random() * 15 + 5),
+                    vz: (Math.random() * 10 - 5),
+                    life: 0.6 + Math.random() * 0.4,
+                    size: 10 + Math.random() * 20,
+                    r: 0, g: 0, b: 0, a: 1.0,
+                    type: 'OIL',
+                    angle: Math.random() * Math.PI * 2
+                });
+            }
+        }
+    }
+
+    public spawnWindParticles(
+        cameraX: number,
+        cameraZ: number,
+        cameraCar: Car,
+        isCentered: boolean = false
+    ): void {
+        // Spawn particles generally "around" the player, but projected to appear at screen edges
+        // Actually, better to spawn them slightly ahead of cameraZ and let them zip PAST.
+
+        // Use ROAD_WIDTH to guess lateral positioning
+        const edgeOffset = isCentered ? 400 : 1800; // Tunnel effect for drafting vs Edges for pressure
+
+        const count = 4; // Increased from 2
         for (let i = 0; i < count; i++) {
+            const side = Math.random() > 0.5 ? 1 : -1;
             this.particles.push({
-                worldX: worldX + (Math.random() * 100 - 50),
-                worldY: 10,
-                worldZ: worldZ,
-                vx: (Math.random() * 20 - 10),
-                vy: (Math.random() * 15 + 5),
-                vz: (Math.random() * 10 - 5),
-                life: 0.6 + Math.random() * 0.4,
-                size: 10 + Math.random() * 20,
-                r: 0, g: 0, b: 0, a: 1.0, // Colors handled in drawParticles
-                type: type === 'PUDDLE' ? 'WATER' : 'OIL',
-                angle: Math.random() * Math.PI * 2
+                worldX: cameraX + (side * edgeOffset) + (Math.random() * 500 - 250),
+                worldY: 500 + Math.random() * 1000,
+                worldZ: cameraZ + 2500 + Math.random() * 2500, // Look ahead
+                vx: 0,
+                vy: 0,
+                vz: 0, // They don't move, the camera moves past them? No, we need them to be fixed in world?
+                // If they are static in world, the camera Vz will make them streak.
+                // BUT `ParticleEngine.draw` logic doesn't use camera speed for streaking directly, it uses perspective.
+                // However, if we want them to look like HIGH SPEED WIND, we might want them to move towards camera too.
+                // Let's just spawn static particles. The player speed is ~12000.
+                // If they are static, they will fly past.
+                life: 1.0,
+                size: 200,
+                r: 255, g: 255, b: 255, a: 0.5, // More opaque
+                type: 'WIND',
+                owner: cameraCar
+                // Actually for wind, we might want them World-Grounded or separate.
+                // Let's attach to cameraCar so we can control height via "Fake 3D" if we want,
+                // OR just calculate worldY high enough.
+                // Let's use ownership = cameraCar, so we can use "Fake 3D" height logic if we spawn them at 0.
+                // But here I spawned at Y=500..1500.
+                // If owner=cameraCar, renderY = 500 + 1150 = 1650. That's fine, near top of screen.
+
             });
         }
+    }
+
+    public spawnSlipstreamParticles(
+        worldX: number,
+        worldY: number,
+        worldZ: number,
+        owner?: Car
+    ): void {
+        // Subtle swirling vortex
+        this.particles.push({
+            worldX,
+            worldY: worldY + 100,
+            worldZ,
+            vx: (Math.random() - 0.5) * 5,
+            vy: (Math.random() - 0.5) * 5,
+            vz: -10, // Move backwards slightly
+            life: 0.8,
+            size: 60, // Significantly larger
+            r: 255, g: 255, b: 255, a: 0.6, // More visible
+            type: 'SLIPSTREAM',
+            owner
+        });
     }
 }

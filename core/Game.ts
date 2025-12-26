@@ -31,6 +31,7 @@ export class Game {
     private lastTime: number = 0;
     private frameId: number = 0;
     private countdownInterval: number | null = null;
+    private showMinimapOverlay: boolean = true;
 
     // Config
     private settings: PlayerSettings;
@@ -43,6 +44,7 @@ export class Game {
     private onFinish: (time: number, totalDistance: number, rank: number, winnerName: string) => void;
     private onCountdownUpdate: (count: number) => void;
     public onViewChange?: (view: number) => void;
+    public onPauseToggle?: () => void;
 
     // UI Refs
     private uiRefs: UIRefs;
@@ -51,7 +53,9 @@ export class Game {
     private finishingSeq = {
         active: false,
         startTime: 0,
-        resultProcessed: false
+        resultProcessed: false,
+        winnerRank: 2,
+        winnerName: ''
     };
 
     constructor(
@@ -99,10 +103,12 @@ export class Game {
         this.oilStains = [];
         this.particles.clear();
         this.input.clear();
-        this.input.setupListeners();
+        this.input.setupListeners((e) => this.handleKeyPress(e));
         this.audio.init();
 
-        this.finishingSeq = { active: false, startTime: 0, resultProcessed: false };
+        this.showMinimapOverlay = true;
+
+        this.finishingSeq = { active: false, startTime: 0, resultProcessed: false, winnerRank: 2, winnerName: '' };
         this.isRacing = false;
         this.setView(0); // Reset view to Player and notify UI
 
@@ -162,6 +168,20 @@ export class Game {
 
     public setMuted(muted: boolean): void {
         this.audio.setMuted(muted);
+    }
+
+    private handleKeyPress(e: KeyboardEvent): void {
+        const key = e.key.toLowerCase();
+
+        // Minimap Toggle ('o' or 'Alt+o')
+        if (key === 'o') {
+            this.showMinimapOverlay = !this.showMinimapOverlay;
+        }
+
+        // Pause Toggle ('p' or 'Alt+p')
+        if (key === 'p') {
+            this.onPauseToggle?.();
+        }
     }
 
     public handleTouchInput(action: 'up' | 'down' | 'left' | 'right', isPressed: boolean): void {
@@ -228,9 +248,12 @@ export class Game {
                     onObstacleHit: (car, type, wx, wy, wz) => {
                         this.particles.spawnCollisionParticles(wx, wy, wz, type as any);
                         if (type === 'PUDDLE' || type === 'OIL') {
-                            this.particles.spawnObstacleParticles(wx, wz, type as any);
+                            // VISUAL TRICK: For the player car, push the particles 1800 units ahead
+                            // so they project at the "base" of the 2D car on screen.
+                            const visualOffset = (car === this.cars[0]) ? 1800 : 0;
+                            this.particles.spawnObstacleParticles(wx, wz, type as any, visualOffset, car.speed);
                         }
-                        if (type === 'OIL') {
+                        if (type === 'OIL' && car.isPlayer) {
                             this.oilStains.push({
                                 alpha: 1.0,
                                 seed: Math.random()
@@ -238,9 +261,9 @@ export class Game {
                         }
 
                         // Audio only for Player (or very close events?)
-                        // User requested no phantom sounds, so restrict to player
                         if (car.isPlayer) {
-                            if (type === 'OIL' || type === 'PUDDLE') this.audio.play('TIRE');
+                            if (type === 'PUDDLE') this.audio.play('SPLASH');
+                            else if (type === 'OIL') this.audio.play('TIRE');
                             else if (type === 'REPAIR') this.audio.play('HEAL');
                             else this.audio.play('CRASH');
                         }
@@ -254,6 +277,24 @@ export class Game {
                     },
                     onLap: (car) => {
                         if (car.isPlayer) this.audio.play('LAP');
+                    },
+                    onDrafting: (car, target) => {
+                        // Spawn slipstream and center-focused wind when drafting
+                        if (car.isPlayer) {
+                            this.particles.spawnSlipstreamParticles(
+                                target.offset * ROAD_WIDTH,
+                                0, // Ground level, will be adjusted by ownership if viewed by owner
+                                target.z,
+                                target
+                            );
+                            // Center wind for high-speed sensation
+                            this.particles.spawnWindParticles(
+                                car.offset * ROAD_WIDTH,
+                                car.z,
+                                car,
+                                true // Centered tunnel effect
+                            );
+                        }
                     }
                 }
             );
@@ -276,6 +317,27 @@ export class Game {
                 );
             }
         });
+
+        // Drafting / Pressure Effect (When distinct Rival is close behind Player)
+        const rival = this.cars[1];
+        if (player && rival && !player.finished && !rival.finished) {
+            // Check loop distance (handling lap wrap-around is complex, simplifed to Z comparison for now as Segments handle Z looping?
+            // Actually gameEngine handles Z increasing indefinitely?
+            // Usually Z increases indefinitely in this engine type until reset?
+            // "trackLength" is total.
+            // Let's assume absolute Z comparison is safe for now within a lap, or if Z is continuous.
+            // Outrun engines usually reset Z or keep increasing.
+            // Let's rely on simple Z diff.
+            const dist = player.z - rival.z;
+            if (dist > 0 && dist < 2500) {
+                this.particles.spawnWindParticles(
+                    player.offset * ROAD_WIDTH,
+                    player.z,
+                    player
+                );
+            }
+        }
+
         this.particles.update();
 
         // HUD Updates
@@ -310,19 +372,26 @@ export class Game {
                 this.finishingSeq.startTime = Date.now();
                 this.audio.stopEngine();
 
+                // LOCK WINNER DATA IMMEDIATELY
                 if (playerDead) {
+                    this.finishingSeq.winnerRank = 2;
+                    this.finishingSeq.winnerName = 'CRASHED';
                     this.audio.play('EXPLOSION');
                     setTimeout(() => this.audio.play('DEFEAT'), 1000);
-                } else if (rivalWon && !player.finished) {
-                    // AI beat player
-                    this.audio.play('DEFEAT');
                 } else {
-                    // Player finished (maybe first?)
-                    // If rival won is true, it means rival finished SAME frame or earlier.
-                    // Priority check:
-                    const rank = (player.finished && (!rivalWon || (rival.lapTime > player.lapTime))) ? 1 : 2;
-                    if (rank === 1) this.audio.play('VICTORY');
-                    else this.audio.play('DEFEAT');
+                    // Decide winner based on who finished first or has better lapTime
+                    // If multiple finished in same frame, compare lapTimes
+                    const isPlayerFirst = player.finished && (!rivalWon || (player.lapTime < rival.lapTime));
+
+                    if (isPlayerFirst) {
+                        this.finishingSeq.winnerRank = 1;
+                        this.finishingSeq.winnerName = this.playerName;
+                        this.audio.play('VICTORY');
+                    } else {
+                        this.finishingSeq.winnerRank = 2;
+                        this.finishingSeq.winnerName = rival ? rival.name : 'CPU';
+                        this.audio.play('DEFEAT');
+                    }
                 }
             }
 
@@ -347,22 +416,8 @@ export class Game {
                 this.finishingSeq.resultProcessed = true;
                 const totalTime = (Date.now() - this.startTime) / 1000;
                 const totalDistance = this.track.length * SEGMENT_LENGTH * this.totalLaps;
-                let rank = 2;
-                let winnerName = 'CPU';
 
-                if (playerDead) {
-                    rank = 2; winnerName = 'CRASHED';
-                } else if (rivalWon) {
-                    // If rival finished, check times if player ALSO finished (rare tie)
-                    if (player.finished && player.lapTime < rival.lapTime) {
-                        rank = 1; winnerName = this.playerName;
-                    } else {
-                        rank = 2; winnerName = rival.name;
-                    }
-                } else {
-                    rank = 1; winnerName = this.playerName;
-                }
-                this.onFinish(totalTime, totalDistance, rank, winnerName);
+                this.onFinish(totalTime, totalDistance, this.finishingSeq.winnerRank, this.finishingSeq.winnerName);
             }
         }
     }
@@ -411,19 +466,20 @@ export class Game {
             }
 
             // Mini-Map (Overlay)
-            // Positioned below HUD (approx 120px down)
-            const mapW = Math.max(150, Math.min(250, fullW * 0.25));
-            const mapH = mapW * 0.75;
+            if (this.showMinimapOverlay) {
+                const mapW = Math.max(150, Math.min(250, fullW * 0.25));
+                const mapH = mapW * 0.75;
 
-            this.graphics.renderMap(
-                this.cars,
-                this.track,
-                mapW,
-                mapH,
-                true, // isOverlay
-                20,   // x
-                120   // y
-            );
+                this.graphics.renderMap(
+                    this.cars,
+                    this.track,
+                    mapW,
+                    mapH,
+                    true, // isOverlay
+                    20,   // x
+                    120   // y
+                );
+            }
         }
     }
 }

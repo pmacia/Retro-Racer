@@ -204,6 +204,7 @@ const App: React.FC = () => {
             trackDefinition={activeTrack}
             playerName={settings.name}
             onFinish={handleFinish}
+            onPauseToggle={pauseGame}
             isPaused={status === GameStatus.PAUSED}
             bestSpeed={bestSpeed}
           />

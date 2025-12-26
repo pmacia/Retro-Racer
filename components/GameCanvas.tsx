@@ -10,11 +10,12 @@ interface GameCanvasProps {
     trackDefinition: TrackDefinition;
     playerName: string;
     onFinish: (time: number, totalDistance: number, rank: number, winnerName: string) => void;
+    onPauseToggle: () => void;
     isPaused: boolean;
     bestSpeed?: number;
 }
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefinition, playerName, onFinish, isPaused, bestSpeed }) => {
+const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefinition, playerName, onFinish, onPauseToggle, isPaused, bestSpeed }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const gameRef = useRef<Game | null>(null);
 
@@ -52,6 +53,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, settings, trackDefiniti
             setCountdown // Connect countdown callback
         );
         game.onViewChange = setActiveView;
+        game.onPauseToggle = onPauseToggle;
         gameRef.current = game;
 
         // Resize Handler

@@ -1,4 +1,4 @@
-export type SoundEffect = 'CRASH' | 'BUMP' | 'EXPLOSION' | 'TIRE' | 'BARREL' | 'REV' | 'GO' | 'VICTORY' | 'DEFEAT' | 'HEAL' | 'CHECKPOINT' | 'LAP';
+export type SoundEffect = 'CRASH' | 'BUMP' | 'EXPLOSION' | 'TIRE' | 'BARREL' | 'REV' | 'GO' | 'VICTORY' | 'DEFEAT' | 'HEAL' | 'CHECKPOINT' | 'LAP' | 'SPLASH';
 
 export class AudioEngine {
     private context: AudioContext | null = null;
@@ -159,6 +159,7 @@ export class AudioEngine {
             case 'HEAL': this.playHeal(t); break;
             case 'CHECKPOINT': this.playCheckpoint(t); break;
             case 'LAP': this.playLap(t); break;
+            case 'SPLASH': this.playSplash(t); break;
         }
     }
 
@@ -446,5 +447,28 @@ export class AudioEngine {
             osc.start(start);
             osc.stop(start + 0.15);
         });
+    }
+
+    private playSplash(t: number): void {
+        if (!this.context || !this.masterGain || !this.noiseBuffer) return;
+
+        const noiseSrc = this.context.createBufferSource();
+        noiseSrc.buffer = this.noiseBuffer;
+
+        const filter = this.context.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(800, t);
+        filter.frequency.exponentialRampToValueAtTime(100, t + 0.5);
+
+        const gain = this.context.createGain();
+        gain.gain.setValueAtTime(1.2, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.6);
+
+        noiseSrc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.masterGain);
+
+        noiseSrc.start(t);
+        noiseSrc.stop(t + 0.7);
     }
 }

@@ -220,9 +220,11 @@ export const updateGame = (
         onCarHit: (type: 'REAR' | 'SIDE', severity: number, worldX: number, worldY: number, worldZ: number) => void;
         onCheckpoint: (car: Car) => void;
         onLap: (car: Car) => void;
+        onDrafting: (car: Car, target: Car) => void; // New: Notification for visuals/physics feedback
     }
 ) => {
     const player = cars[0];
+    const rival = cars[1];
     const trackLength = track.length * SEGMENT_LENGTH;
 
     // If exploded, stop everything for player
@@ -271,7 +273,9 @@ export const updateGame = (
                                 car.offset += (car.offset > sprite.offset ? 0.2 : -0.2);
                                 break;
                             case 'PUDDLE':
-                                car.speed *= 0.95;
+                                car.speed *= 0.90; // Increased penalty (was 0.95)
+                                // Hydroplaning: slight lateral pull
+                                car.offset += (Math.random() - 0.5) * 0.12;
                                 break;
                             case 'REPAIR':
                                 car.damage = Math.max(0, car.damage + DAMAGE.REPAIR_AMOUNT);
@@ -279,7 +283,8 @@ export const updateGame = (
                                 break;
                         }
 
-                        if (car.speed > 1000 || sprite.source === 'REPAIR') {
+                        const isNonDestructive = ['REPAIR', 'PUDDLE', 'OIL'].includes(sprite.source);
+                        if (car.speed > 1000 || isNonDestructive) {
                             const actualDmg = baseDmg > 0 ? baseDmg * (0.5 + speedRatio * 0.5) : 0;
                             car.damage += actualDmg;
 
@@ -307,7 +312,6 @@ export const updateGame = (
     });
 
     // --- 2. COLLISION WITH RIVAL ---
-    const rival = cars[1];
     if (rival && !rival.finished && !player.finished && !rival.exploded) {
         let distZ = player.z - rival.z;
         // Handle Loop Wrapping
@@ -391,9 +395,26 @@ export const updateGame = (
 
     // --- PHYSICS ENGINE ---
 
+    // --- DRAFTING PHYSICS (SPEED BOOST) ---
+    let effectiveMaxSpeed = player.maxSpeed;
+    let accelerationMultiplier = 1.0;
+
+    if (rival && !rival.exploded && !rival.finished) {
+        let distZ = player.z - rival.z;
+        if (distZ > trackLength / 2) distZ -= trackLength;
+        if (distZ < -trackLength / 2) distZ += trackLength;
+
+        // Player is behind rival and close laterally
+        if (distZ < 0 && distZ > -2500 && Math.abs(player.offset - rival.offset) < 0.35) {
+            effectiveMaxSpeed *= 1.10; // 10% more top speed
+            accelerationMultiplier = 1.25; // 25% more punch
+            callbacks.onDrafting(player, rival);
+        }
+    }
+
     // 1. Longitudinal (Accel/Brake)
     if (input.up) {
-        player.speed += player.accel;
+        player.speed += player.accel * accelerationMultiplier;
     } else if (input.down) {
         player.speed -= PHYSICS.BRAKING;
     } else {
@@ -407,7 +428,7 @@ export const updateGame = (
         player.speed -= (depth * depth * PHYSICS.DECEL_OFFROAD);
     }
 
-    player.speed = Math.max(0, Math.min(player.speed, player.maxSpeed));
+    player.speed = Math.max(0, Math.min(player.speed, effectiveMaxSpeed));
 
     // Normalized Speed (0.0 to 1.0)
     const speedRatio = player.speed / player.maxSpeed;
@@ -456,22 +477,31 @@ export const updateGame = (
         const aiSegment = track[Math.floor(ai.z / SEGMENT_LENGTH) % track.length];
 
         // AI Physics Model
-        // 1. Acceleration & Braking
-        // 1. Acceleration & Braking (Look Ahead)
-        const lookAhead = 45; // Increased scan distance (was 20)
-        const futureSegment = track[(Math.floor(ai.z / SEGMENT_LENGTH) + lookAhead) % track.length];
-        const futureCurve = Math.abs(futureSegment.curve);
-
+        // --- AI DRAFTING ---
+        let aiMaxSpeedMultiplier = 1.0;
+        let aiAccelMultiplier = 1.0;
         let distToPlayer = player.z - ai.z;
         if (distToPlayer < -trackLength / 2) distToPlayer += trackLength;
         if (distToPlayer > trackLength / 2) distToPlayer -= trackLength;
 
-        let targetSpeed = ai.maxSpeed;
-        if (futureCurve > 2) {
-            // Slow down for corners but maintain at least 25% speed
-            const cornerFactor = 1 - (futureCurve / 8);
-            targetSpeed = ai.maxSpeed * Math.max(0.25, cornerFactor);
+        if (distToPlayer > 0 && distToPlayer < 2500 && Math.abs(ai.offset - player.offset) < 0.35) {
+            aiMaxSpeedMultiplier = 1.10;
+            aiAccelMultiplier = 1.25;
+            callbacks.onDrafting(ai, player);
         }
+
+        // 1. Acceleration & Braking (Look Ahead)
+        const lookAhead = 45;
+        const futureSegment = track[(Math.floor(ai.z / SEGMENT_LENGTH) + lookAhead) % track.length];
+        const futureCurve = Math.abs(futureSegment.curve);
+
+        let targetSpeed = ai.maxSpeed * aiMaxSpeedMultiplier;
+        if (futureCurve > 2) {
+            const cornerFactor = 1 - (futureCurve / 8);
+            targetSpeed = (ai.maxSpeed * aiMaxSpeedMultiplier) * Math.max(0.25, cornerFactor);
+        }
+
+
 
         // Initialize evasion state if not set
         if (!ai.evasionState) ai.evasionState = 'normal';
@@ -519,7 +549,7 @@ export const updateGame = (
         if (ai.evasionState === 'blocked') {
             // Brake to maintain safe distance, but keep minimum speed
             const safetyGap = 600;
-            const minBlockedSpeed = ai.maxSpeed * 0.2; // Minimum speed to allow transition to evading
+            const minBlockedSpeed = (ai.maxSpeed * aiMaxSpeedMultiplier) * 0.2;
 
             if (distToPlayer < safetyGap) {
                 ai.speed -= PHYSICS.BRAKING * 1.8; // Hard brake
@@ -530,22 +560,22 @@ export const updateGame = (
             }
         } else if (ai.evasionState === 'evading') {
             // Maintain minimum speed for evasion maneuvers, even if player is stopped
-            const minEvasionSpeed = ai.maxSpeed * 0.3; // Minimum 30% speed for visible movement
+            const minEvasionSpeed = (ai.maxSpeed * aiMaxSpeedMultiplier) * 0.3;
             const targetEvasionSpeed = Math.max(minEvasionSpeed, player.speed * 0.9);
 
             if (ai.speed > targetEvasionSpeed + 10) {
                 ai.speed -= PHYSICS.BRAKING * 0.5;
             } else if (ai.speed < targetEvasionSpeed - 10) {
-                ai.speed += ai.accel * 0.8;
+                ai.speed += ai.accel * aiAccelMultiplier * 0.8;
             }
         } else if (ai.evasionState === 'overtaking') {
             // ACCELERATE DECISIVELY
-            ai.speed += ai.accel * 1.5; // Boost acceleration
-            if (ai.speed > ai.maxSpeed * 1.1) ai.speed = ai.maxSpeed * 1.1; // Allow slight overspeed
+            ai.speed += ai.accel * aiAccelMultiplier * 1.5; // Boost acceleration
+            if (ai.speed > (ai.maxSpeed * aiMaxSpeedMultiplier) * 1.1) ai.speed = (ai.maxSpeed * aiMaxSpeedMultiplier) * 1.1;
         } else {
             // Normal speed control
             if (ai.speed < targetSpeed) {
-                ai.speed += ai.accel;
+                ai.speed += ai.accel * aiAccelMultiplier;
             } else {
                 ai.speed -= PHYSICS.BRAKING * 0.5;
             }
@@ -694,6 +724,10 @@ export const updateGame = (
 
     // --- 6. LAP MANAGEMENT ---
     cars.forEach(car => {
+        if (!car.exploded && !car.finished) {
+            car.lapTime += dt;
+        }
+
         // Checkpoint Logic (3 checkpoints per lap)
         const CHECKPOINTS_PER_LAP = 3;
         const checkpointInterval = trackLength / CHECKPOINTS_PER_LAP;
