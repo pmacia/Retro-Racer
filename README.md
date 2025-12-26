@@ -75,9 +75,10 @@ Compite contra la IA, completa el número de vueltas seleccionado y cruza la met
 | **Girar Derecha** | `➡️` o `D` | Botón ➡️ |
 | **Acelerar** | `⬆️` o `W` | Botón Verde 🟢 |
 | **Frenar** | `⬇️` o `S` | Botón Rojo 🔴 |
-| **Silenciar Audio** | Clic en icono 🔊 | Clic en icono 🔊 |
-| **Alternar Mapa** | Clic en icono 🗺️ | Clic en icono 🗺️ |
-| **Pausa** | `P` o Botón UI | Botón Pausa |
+| **Silenciar Audio** | Clic icono 🔊 | Clic icono 🔊 |
+| **Alternar Minimapa** | `O` o Clic 🗺️ | Clic icono 🗺️ |
+| **Pausa / Continuar** | `P` o Botón UI | Botón Pausa |
+| **Cambiar Cámara** | `1`, `2`, `3`, `4` | - |
 
 ### HUD (Interfaz)
 ![HUD Explanation](screenshots/hud.png)
@@ -87,10 +88,14 @@ Compite contra la IA, completa el número de vueltas seleccionado y cruza la met
     *   En **Pantalla Dividida** (tecla `3`): Se muestran dos barras de daño, una para el jugador (izquierda) y otra para el rival (derecha).
 *   **LAP**: Vuelta actual / Total.
 *   **MINIMAPA**: Muestra la posición de los corredores y obstáculos en tiempo real.
-*   **VISTAS DE CÁMARA**:
-    *   **Vista Jugador** (tecla `1`): Sigue tu coche.
-    *   **Vista Rival** (tecla `2`): Sigue al rival de la IA.
-    *   **Pantalla Dividida** (tecla `3`): Muestra ambos coches simultáneamente.
+*   **VISTAS DE CÁMARA** (Teclas `1`-`4` o `Alt` + `1`-`4`):
+    *   **Vista Jugador** (tecla `1`): Cámara clásica tras el coche del jugador.
+    *   **Vista Rival** (tecla `2`): Cámara de seguimiento para el líder de la IA.
+    *   **Pantalla Dividida Vertical** (tecla `3`): Vista lado a lado para Player y CPU.
+    *   **Pantalla Dividida Horizontal** (tecla `4`): Vista arriba y abajo.
+
+> [!TIP]
+> Todos los atajos (`1`-`4`, `O`, `P`) también funcionan manteniendo pulsada la tecla `Alt`.
 
 ---
 
